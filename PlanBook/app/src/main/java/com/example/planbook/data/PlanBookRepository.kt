@@ -146,6 +146,7 @@ class PlanBookRepository @Inject constructor(
                 ReviewType.DAILY -> null
                 ReviewType.WEEKLY -> weekStart.with(TemporalAdjusters.nextOrSame(DayOfWeek.SUNDAY))
                 ReviewType.MONTHLY -> weekStart.with(TemporalAdjusters.lastDayOfMonth())
+                else -> null
             }
 
             val datesToCreate = if (targetDate != null) listOf(targetDate) else weekDays
