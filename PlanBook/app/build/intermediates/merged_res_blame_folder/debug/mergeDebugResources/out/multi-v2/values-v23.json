@@ -1,0 +1,36 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.example.planbook.app-mergeDebugResources-67:/values-v23/values-v23.xml",
+            "map": [
+                {
+                    "source": "C:\\Users\\XXL04\\.gradle\\caches\\transforms-4\\906d8bda03c3df55630cc53447d3f10f\\transformed\\work-runtime-2.7.1\\res\\values-v23\\values-v23.xml",
+                    "from": {
+                        "startLines": "2,3",
+                        "startColumns": "4,4",
+                        "startOffsets": "55,121",
+                        "endColumns": "65,62",
+                        "endOffsets": "116,179"
+                    }
+                },
+                {
+                    "source": "C:\\Users\\XXL04\\.gradle\\caches\\transforms-4\\2020c18af439fe3fc43f50d27b022513\\transformed\\glance-appwidget-1.1.0\\res\\values-v23\\values-v23.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "55",
+                        "endOffsets": "106"
+                    },
+                    "to": {
+                        "startLines": "4",
+                        "startColumns": "4",
+                        "startOffsets": "184",
+                        "endColumns": "55",
+                        "endOffsets": "235"
+                    }
+                }
+            ]
+        }
+    ]
+}

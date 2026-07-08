@@ -1,3 +1,3 @@
 <resources>
-    <style name="Theme.PlanBook" parent="android:Theme.Material3.DayNight.NoActionBar" />
+    <style name="Theme.PlanBook" parent="Theme.Material3.DayNight.NoActionBar" />
 </resources>
