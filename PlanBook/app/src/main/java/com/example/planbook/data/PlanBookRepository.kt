@@ -138,7 +138,7 @@ class PlanBookRepository @Inject constructor(
 
     // region Auto review tasks generation
     suspend fun ensureAutoReviewTasks(notebookId: Long, weekStart: LocalDate) {
-        val settings = db.reviewSettingDao().getByNotebook(notebookId).first()
+        val settings = getReviewSettings(notebookId).first()
         val weekDays = (0..6).map { weekStart.plusDays(it.toLong()) }
 
         settings.forEach { setting ->
@@ -146,7 +146,6 @@ class PlanBookRepository @Inject constructor(
                 ReviewType.DAILY -> null
                 ReviewType.WEEKLY -> weekStart.with(TemporalAdjusters.nextOrSame(DayOfWeek.SUNDAY))
                 ReviewType.MONTHLY -> weekStart.with(TemporalAdjusters.lastDayOfMonth())
-                else -> null
             }
 
             val datesToCreate = if (targetDate != null) listOf(targetDate) else weekDays
