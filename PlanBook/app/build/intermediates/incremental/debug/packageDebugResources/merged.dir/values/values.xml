@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="app_name">计划本</string>
-    <style name="Theme.PlanBook" parent="Theme.Material3.DayNight.NoActionBar"/>
-</resources>
