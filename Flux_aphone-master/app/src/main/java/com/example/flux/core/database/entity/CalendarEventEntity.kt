@@ -1,0 +1,34 @@
+package com.example.flux.core.database.entity
+
+import androidx.room.ColumnInfo
+import androidx.room.Entity
+import androidx.room.Index
+import androidx.room.PrimaryKey
+
+@Entity(
+    tableName = "calendar_events",
+    indices = [
+        Index(name = "idx_events_range", value = ["start_at", "end_at", "deleted_at"]),
+        Index(name = "idx_events_start", value = ["start_at", "deleted_at"]),
+        Index(name = "idx_events_subscription", value = ["subscription_id", "external_uid"], unique = true)
+    ]
+)
+data class CalendarEventEntity(
+    @PrimaryKey val id: String,
+    val title: String,
+    @ColumnInfo(defaultValue = "''") val description: String = "",
+    @ColumnInfo(name = "start_at") val startAt: String,
+    @ColumnInfo(name = "end_at") val endAt: String,
+    @ColumnInfo(name = "all_day", defaultValue = "0") val allDay: Int = 0,
+    val color: String?,
+    @ColumnInfo(name = "location_name") val locationName: String?,
+    @ColumnInfo(name = "reminder_minutes") val reminderMinutes: Int?,
+    @ColumnInfo(name = "recurrence_rule") val recurrenceRule: String?,
+    @ColumnInfo(name = "subscription_id") val subscriptionId: String? = null,
+    @ColumnInfo(name = "external_uid") val externalUid: String? = null,
+    @ColumnInfo(name = "external_hash") val externalHash: String? = null,
+    @ColumnInfo(name = "created_at") val createdAt: String,
+    @ColumnInfo(name = "updated_at") val updatedAt: String,
+    @ColumnInfo(name = "deleted_at") val deletedAt: String?,
+    @ColumnInfo(defaultValue = "1") val version: Int = 1
+)
