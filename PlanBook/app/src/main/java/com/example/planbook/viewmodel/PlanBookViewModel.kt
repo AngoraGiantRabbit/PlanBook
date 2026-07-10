@@ -19,6 +19,7 @@ data class PlanBookUiState(
     val weekStart: LocalDate = LocalDate.now().with(WeekFields.of(java.util.Locale.CHINA).dayOfWeek(), 1L),
     val showNotebookSelector: Boolean = false,
     val showAddTaskDialog: Boolean = false,
+    val editingTask: Task? = null,
     val isLoading: Boolean = false
 )
 
@@ -89,6 +90,35 @@ class PlanBookViewModel @Inject constructor(
         }
     }
 
+    fun updateTask(task: Task) {
+        viewModelScope.launch {
+            repository.updateTask(task)
+            _uiState.value.currentNotebook?.let { loadTasks(it.id, _uiState.value.weekStart) }
+        }
+    }
+
+    fun deleteTask(task: Task) {
+        viewModelScope.launch {
+            repository.deleteTask(task)
+            _uiState.value.currentNotebook?.let { loadTasks(it.id, _uiState.value.weekStart) }
+            _uiState.update { it.copy(editingTask = null) }
+        }
+    }
+
+    /** 临时/每日任务去掉时间变灵活（PRD 4.3.3） */
+    fun stripTimeToFlex(task: Task) {
+        viewModelScope.launch {
+            repository.updateTask(
+                task.copy(
+                    startTime = null,
+                    endTime = null,
+                    type = com.example.planbook.model.TaskType.FLEX
+                )
+            )
+            _uiState.value.currentNotebook?.let { loadTasks(it.id, _uiState.value.weekStart) }
+        }
+    }
+
     fun toggleTaskComplete(task: Task) {
         viewModelScope.launch {
             repository.toggleTaskComplete(task)
@@ -96,8 +126,24 @@ class PlanBookViewModel @Inject constructor(
         }
     }
 
-    fun onTaskClick(task: Task) {
-        // TODO: 打开任务详情/编辑
+    /** 点击任务：加载原始任务（避免展开后的单日 copy 覆盖跨天范围），打开编辑器 */
+    fun openTaskEditor(task: Task) {
+        viewModelScope.launch {
+            val original = repository.getTaskById(task.id)
+            _uiState.update { it.copy(editingTask = original ?: task) }
+        }
+    }
+
+    fun saveEditedTask(task: Task) {
+        viewModelScope.launch {
+            repository.updateTask(task)
+            _uiState.value.currentNotebook?.let { loadTasks(it.id, _uiState.value.weekStart) }
+            _uiState.update { it.copy(editingTask = null) }
+        }
+    }
+
+    fun closeTaskEditor() {
+        _uiState.update { it.copy(editingTask = null) }
     }
 
     fun refresh() {

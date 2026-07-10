@@ -67,7 +67,7 @@ fun PlanBookScreen(
                     tasks = uiState.tasks,
                     weekStart = uiState.weekStart,
                     onToggleComplete = { viewModel.toggleTaskComplete(it) },
-                    onTaskClick = { viewModel.onTaskClick(it) }
+                    onTaskClick = { viewModel.openTaskEditor(it) }
                 )
             }
         }
@@ -88,6 +88,16 @@ fun PlanBookScreen(
             notebookId = uiState.currentNotebook?.id ?: 0,
             onDismiss = { viewModel.hideAddTaskDialog() },
             onConfirm = { viewModel.addTask(it) }
+        )
+    }
+
+    uiState.editingTask?.let { task ->
+        TaskEditSheet(
+            notebookId = task.notebookId,
+            existing = task,
+            onDismiss = { viewModel.closeTaskEditor() },
+            onConfirm = { viewModel.saveEditedTask(it) },
+            onDelete = { viewModel.deleteTask(task) }
         )
     }
 }

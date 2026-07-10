@@ -1,6 +1,8 @@
 package com.example.planbook.ui.screens
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -9,33 +11,57 @@ import com.example.planbook.model.RepeatRule
 import com.example.planbook.model.Task
 import com.example.planbook.model.TaskType
 import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * 复用的任务编辑表单：新建与编辑共用（PRD 4.3.3）。
+ * 新建时 [existing] 传 null；编辑时传入待编辑任务。
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun AddTaskDialog(
+fun TaskEditSheet(
     notebookId: Long,
+    existing: Task? = null,
     onDismiss: () -> Unit,
-    onConfirm: (Task) -> Unit
+    onConfirm: (Task) -> Unit,
+    onDelete: (() -> Unit)? = null
 ) {
-    var title by remember { mutableStateOf("") }
-    var selectedType by remember { mutableStateOf(TaskType.ONE_OFF) }
-    var startDate by remember { mutableStateOf(LocalDate.now().toString()) }
-    var endDate by remember { mutableStateOf(LocalDate.now().toString()) }
-    var startTime by remember { mutableStateOf("") }
-    var endTime by remember { mutableStateOf("") }
-    var repeatRule by remember { mutableStateOf(RepeatRule.EVERY_DAY) }
-    var selectedDays by remember { mutableStateOf(setOf(LocalDate.now().dayOfWeek.value)) }
+    val isNew = existing == null
+    var title by remember { mutableStateOf(existing?.title ?: "") }
+    var description by remember { mutableStateOf(existing?.description ?: "") }
+    var selectedType by remember { mutableStateOf(existing?.type ?: TaskType.ONE_OFF) }
+    var startDate by remember { mutableStateOf(existing?.startDate ?: LocalDate.now().toString()) }
+    var endDate by remember { mutableStateOf(existing?.endDate ?: LocalDate.now().toString()) }
+    var startTime by remember { mutableStateOf(existing?.startTime ?: "") }
+    var endTime by remember { mutableStateOf(existing?.endTime ?: "") }
+    var repeatRule by remember { mutableStateOf(existing?.repeatRule ?: RepeatRule.EVERY_DAY) }
+    var selectedDays by remember {
+        mutableStateOf(
+            existing?.weeklyDays?.split(",")?.mapNotNull { it.toIntOrNull() }?.toSet()
+                ?: setOf(LocalDate.now().dayOfWeek.value)
+        )
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("添加任务") },
+        title = { Text(if (isNew) "添加任务" else "编辑任务") },
         text = {
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+            ) {
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
                     label = { Text("任务名称") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("备注（可选）") },
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(8.dp))
@@ -66,7 +92,7 @@ fun AddTaskDialog(
                 OutlinedTextField(
                     value = endDate,
                     onValueChange = { endDate = it },
-                    label = { Text("结束日期 yyyy-MM-dd") },
+                    label = { Text(if (selectedType == TaskType.LONG_TERM) "截止日期 DDL" else "结束日期 yyyy-MM-dd") },
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -103,7 +129,10 @@ fun AddTaskDialog(
                     if (repeatRule == RepeatRule.WEEKDAYS) {
                         Spacer(modifier = Modifier.height(4.dp))
                         Text("选择每周哪几天", style = MaterialTheme.typography.labelSmall)
-                        Row(modifier = Modifier.fillMaxWidth()) {
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
                             (1..7).forEach { day ->
                                 FilterChip(
                                     selected = day in selectedDays,
@@ -116,7 +145,6 @@ fun AddTaskDialog(
                                     },
                                     label = { Text(dayName(day)) }
                                 )
-                                Spacer(modifier = Modifier.width(2.dp))
                             }
                         }
                     }
@@ -124,26 +152,43 @@ fun AddTaskDialog(
             }
         },
         confirmButton = {
-            TextButton(
-                onClick = {
-                    val task = Task(
-                        notebookId = notebookId,
-                        title = title,
-                        type = selectedType,
-                        startDate = startDate,
-                        endDate = endDate,
-                        startTime = startTime.takeIf { it.isNotBlank() },
-                        endTime = endTime.takeIf { it.isNotBlank() },
-                        repeatRule = if (selectedType == TaskType.DAILY) repeatRule else null,
-                        weeklyDays = if (selectedType == TaskType.DAILY && repeatRule == RepeatRule.WEEKDAYS) {
-                            selectedDays.sorted().joinToString(",")
-                        } else null
-                    )
-                    onConfirm(task)
-                },
-                enabled = title.isNotBlank()
-            ) {
-                Text("确定")
+            Row {
+                if (!isNew && onDelete != null) {
+                    TextButton(
+                        onClick = onDelete,
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Text("删除")
+                    }
+                }
+                TextButton(
+                    onClick = {
+                        val task = Task(
+                            id = existing?.id ?: 0,
+                            notebookId = notebookId,
+                            title = title,
+                            description = description,
+                            type = selectedType,
+                            startDate = startDate,
+                            endDate = endDate,
+                            startTime = startTime.takeIf { it.isNotBlank() },
+                            endTime = endTime.takeIf { it.isNotBlank() },
+                            repeatRule = if (selectedType == TaskType.DAILY) repeatRule else null,
+                            weeklyDays = if (selectedType == TaskType.DAILY && repeatRule == RepeatRule.WEEKDAYS) {
+                                selectedDays.sorted().joinToString(",")
+                            } else null,
+                            isCompleted = existing?.isCompleted ?: false,
+                            completedAt = existing?.completedAt,
+                            isAutoReview = existing?.isAutoReview ?: false,
+                            reviewType = existing?.reviewType,
+                            createdAt = existing?.createdAt ?: System.currentTimeMillis()
+                        )
+                        onConfirm(task)
+                    },
+                    enabled = title.isNotBlank()
+                ) {
+                    Text(if (isNew) "确定" else "保存")
+                }
             }
         },
         dismissButton = {
@@ -151,6 +196,21 @@ fun AddTaskDialog(
                 Text("取消")
             }
         }
+    )
+}
+
+/** 新建任务的便捷入口（保持向后兼容） */
+@Composable
+fun AddTaskDialog(
+    notebookId: Long,
+    onDismiss: () -> Unit,
+    onConfirm: (Task) -> Unit
+) {
+    TaskEditSheet(
+        notebookId = notebookId,
+        existing = null,
+        onDismiss = onDismiss,
+        onConfirm = onConfirm
     )
 }
 

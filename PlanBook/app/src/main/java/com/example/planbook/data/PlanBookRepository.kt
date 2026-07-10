@@ -158,6 +158,8 @@ class PlanBookRepository @Inject constructor(
 
     suspend fun addTask(task: Task) = db.taskDao().insert(task.toEntity())
 
+    suspend fun getTaskById(taskId: Long): Task? = db.taskDao().getById(taskId)?.toModel()
+
     suspend fun updateTask(task: Task) = db.taskDao().update(task.toEntity())
 
     suspend fun deleteTask(task: Task) = db.taskDao().delete(task.toEntity())
