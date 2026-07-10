@@ -7,6 +7,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -168,6 +170,7 @@ fun WeekView(
 ) {
     val weekDays = (0..6).map { weekStart.plusDays(it.toLong()) }
     val formatter = DateTimeFormatter.ofPattern("MM/dd")
+    // 用 dayOfWeek 动态生成星期名，避免硬编码错位（问题7）
     val weekdayNames = listOf("一", "二", "三", "四", "五", "六", "日")
     val today = LocalDate.now()
 
@@ -175,7 +178,7 @@ fun WeekView(
         // 表头（可点击选中某一天）
         Row(modifier = Modifier.fillMaxWidth()) {
             Box(modifier = Modifier.width(48.dp)) { }
-            weekDays.forEachIndexed { index, date ->
+            weekDays.forEach { date ->
                 Column(
                     modifier = Modifier
                         .weight(1f)
@@ -188,7 +191,7 @@ fun WeekView(
                         .padding(vertical = 2.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text("周${weekdayNames[index]}", style = MaterialTheme.typography.labelSmall)
+                    Text("周${weekdayNames[date.dayOfWeek.value - 1]}", style = MaterialTheme.typography.labelSmall)
                     Text(
                         date.format(formatter),
                         style = MaterialTheme.typography.labelSmall,
@@ -204,53 +207,80 @@ fun WeekView(
             }
         }
 
-        // 时段任务区
+        // 时段任务区：绝对定位，任务块按 startTime/endTime 精确放置 + 并列
+        val hourHeight = 56.dp
+        val startHourRange = 6 // 06:00 开始
+        val endHourRange = 24   // 24:00 结束
+        val totalHours = endHourRange - startHourRange
+
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
         ) {
-            Column {
-                val hours = 6..24
-                hours.forEach { hour ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                    ) {
+            Row(modifier = Modifier.height(hourHeight * totalHours)) {
+                // 左侧时间轴
+                Column(modifier = Modifier.width(40.dp)) {
+                    for (h in startHourRange until endHourRange) {
                         Text(
-                            text = "$hour:00",
+                            text = "%02d:00".format(h),
                             style = MaterialTheme.typography.labelSmall,
-                            modifier = Modifier.width(48.dp)
+                            modifier = Modifier.height(hourHeight)
                         )
-                        weekDays.forEach { date ->
-                            val cellTasks = tasks.filter {
-                                it.startDate == date.toString() &&
-                                it.startTime != null &&
-                                it.startTime.startsWith("%02d".format(hour))
+                    }
+                }
+                // 7 天的列
+                weekDays.forEach { date ->
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .background(Color.LightGray.copy(alpha = 0.15f))
+                    ) {
+                        // 背景网格线
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            for (h in startHourRange until endHourRange) {
+                                HorizontalDivider(
+                                    modifier = Modifier.height(hourHeight),
+                                    thickness = 0.5.dp,
+                                    color = Color.LightGray.copy(alpha = 0.5f)
+                                )
                             }
-                            Box(
+                        }
+                        // 该天有时段的任务
+                        val dayTimedTasks = tasks.filter {
+                            it.startDate == date.toString() && it.startTime != null
+                        }
+                        // 按开始时间分组，同时段重叠的并列
+                        dayTimedTasks.forEach { task ->
+                            val startMin = timeToMinutes(task.startTime!!) - startHourRange * 60
+                            val endMin = timeToMinutes(task.endTime ?: task.startTime) - startHourRange * 60
+                            if (endMin <= startMin) return@forEach // 跳过无效
+                            // 并列：同一时段重叠的任务横向分配
+                            val overlapping = dayTimedTasks.filter { other ->
+                                val os = timeToMinutes(other.startTime!!) - startHourRange * 60
+                                val oe = timeToMinutes(other.endTime ?: other.startTime) - startHourRange * 60
+                                os < endMin && startMin < oe
+                            }
+                            val idx = overlapping.indexOf(task)
+                            val count = overlapping.size
+                            val density = androidx.compose.ui.platform.LocalDensity.current
+                            val offsetDp = with(density) {
+                                (startMin * (hourHeight.value / 60f)).dp
+                            }
+                            val heightDp = with(density) {
+                                ((endMin - startMin) * (hourHeight.value / 60f)).dp
+                            }
+                            TaskBlock(
+                                task = task,
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight()
-                                    .padding(1.dp)
-                                    .background(Color.LightGray.copy(alpha = 0.2f))
-                                    // 点击空白时段 → 新建临时任务，预填该时段（PRD 4.2.2）
-                                    .clickable {
-                                        if (cellTasks.isEmpty()) {
-                                            onCellClick(date.toString(), hour)
-                                        }
-                                    }
-                            ) {
-                                cellTasks.forEach { task ->
-                                    TaskBlock(
-                                        task = task,
-                                        modifier = Modifier.fillMaxSize(),
-                                        onClick = { onTaskClick(task) }
-                                    )
-                                }
-                            }
+                                    .offset(y = offsetDp)
+                                    .fillMaxWidth(1f / count)
+                                    .padding(start = (idx * 2).dp, end = 1.dp)
+                                    .height(heightDp),
+                                onClick = { onTaskClick(task) }
+                            )
                         }
                     }
                 }
@@ -469,4 +499,13 @@ fun NotebookSelectorDialog(
             }
         }
     )
+}
+
+/** "HH:mm" → 当日分钟数（问题1：课表按时间精确放置任务块） */
+private fun timeToMinutes(hhmm: String): Int {
+    val parts = hhmm.split(":")
+    if (parts.size != 2) return 0
+    val h = parts[0].toIntOrNull() ?: 0
+    val m = parts[1].toIntOrNull() ?: 0
+    return h * 60 + m
 }

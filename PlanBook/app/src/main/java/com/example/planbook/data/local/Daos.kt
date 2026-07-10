@@ -86,3 +86,24 @@ interface ReviewSettingDao {
     @Update
     suspend fun update(setting: ReviewSettingEntity)
 }
+
+@Dao
+interface TaskCompletionDao {
+    /** 某任务在某天是否已完成 */
+    @Query("SELECT EXISTS(SELECT 1 FROM task_completions WHERE taskId = :taskId AND date = :date)")
+    suspend fun isCompleted(taskId: Long, date: String): Boolean
+
+    /** 批量查询某计划本在某天的所有已完成 taskId */
+    @Query("SELECT taskId FROM task_completions WHERE date = :date")
+    suspend fun getCompletedTaskIds(date: String): List<Long>
+
+    /** 查询某任务所有完成的日期 */
+    @Query("SELECT date FROM task_completions WHERE taskId = :taskId")
+    suspend fun getDatesForTask(taskId: Long): List<String>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(completion: TaskCompletionEntity)
+
+    @Query("DELETE FROM task_completions WHERE taskId = :taskId AND date = :date")
+    suspend fun delete(taskId: Long, date: String)
+}

@@ -36,6 +36,8 @@ fun ReviewEditScreen(
     viewModel: ReviewViewModel = hiltViewModel()
 ) {
     val state by viewModel.editState.collectAsState()
+    val calState by viewModel.calendarState.collectAsState()
+    val notebookId = calState.currentNotebook?.id ?: 0L
 
     LaunchedEffect(date) {
         viewModel.openReviewEdit(date)
@@ -65,6 +67,15 @@ fun ReviewEditScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                // 保存按钮：保存并返回（问题5）
+                actions = {
+                    TextButton(onClick = {
+                        viewModel.saveReviewContent(text)
+                        onBack()
+                    }) {
+                        Text("保存")
                     }
                 }
             )
@@ -109,8 +120,8 @@ fun ReviewEditScreen(
                 Text("暂无临近 DDL 的长期任务", style = MaterialTheme.typography.bodySmall)
             } else {
                 state.longTermTasks.forEach { task ->
-                    LongTermSplitRow(task = task, onSplit = { asFlex ->
-                        viewModel.splitLongTermTask(task, asFlex)
+                    LongTermSplitRow(task = task, notebookId = notebookId, onSplit = { subTask ->
+                        viewModel.splitLongTermTask(subTask)
                     })
                 }
             }
@@ -135,10 +146,11 @@ private fun CompletedTaskRow(task: Task) {
     }
 }
 
-/** 长期任务行：点击拆分为灵活或临时任务，原长期保留（PRD 4.4.4） */
+/** 长期任务行：点击拆分为灵活/临时/每日任务，选中后打开编辑表单，原长期保留（PRD 4.4.4） */
 @Composable
-private fun LongTermSplitRow(task: Task, onSplit: (Boolean) -> Unit) {
+private fun LongTermSplitRow(task: Task, notebookId: Long, onSplit: (Task) -> Unit) {
     var showSplit by remember { mutableStateOf(false) }
+    var editType by remember { mutableStateOf<com.example.planbook.model.TaskType?>(null) }
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -163,21 +175,37 @@ private fun LongTermSplitRow(task: Task, onSplit: (Boolean) -> Unit) {
         AlertDialog(
             onDismissRequest = { showSplit = false },
             title = { Text("拆分「${task.title}」") },
-            text = { Text("拆分为哪种任务？原长期任务会保留。") },
+            text = { Text("拆分为哪种任务？可设置名称和时间，原长期任务会保留。") },
             confirmButton = {
-                TextButton(onClick = {
-                    onSplit(true)
-                    showSplit = false
-                }) { Text("灵活任务") }
-            },
-            dismissButton = {
-                Row {
+                Column {
                     TextButton(onClick = {
-                        onSplit(false)
+                        editType = com.example.planbook.model.TaskType.FLEX
+                        showSplit = false
+                    }) { Text("灵活任务") }
+                    TextButton(onClick = {
+                        editType = com.example.planbook.model.TaskType.ONE_OFF
                         showSplit = false
                     }) { Text("临时任务") }
-                    TextButton(onClick = { showSplit = false }) { Text("取消") }
+                    TextButton(onClick = {
+                        editType = com.example.planbook.model.TaskType.DAILY
+                        showSplit = false
+                    }) { Text("每日任务") }
                 }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSplit = false }) { Text("取消") }
+            }
+        )
+    }
+    // 选好类型后，打开完整编辑表单（预填标题）
+    editType?.let { type ->
+        TaskEditSheet(
+            notebookId = notebookId,
+            existing = task.copy(id = 0, title = task.title, type = type),
+            onDismiss = { editType = null },
+            onConfirm = { subTask ->
+                onSplit(subTask)
+                editType = null
             }
         )
     }

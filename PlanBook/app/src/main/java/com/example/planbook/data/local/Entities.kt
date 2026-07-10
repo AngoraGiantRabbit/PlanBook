@@ -57,3 +57,19 @@ data class ReviewSettingEntity(
     val startTime: String,     // HH:mm
     val endTime: String        // HH:mm
 )
+
+/**
+ * 任务完成记录：按天记录某任务在某天被完成（解决问题2：跨天任务每天独立完成）。
+ * 同一个 taskId 在不同 date 各有一条记录。
+ */
+@Entity(
+    tableName = "task_completions",
+    indices = [Index(value = ["taskId", "date"], unique = true)]
+)
+data class TaskCompletionEntity(
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
+    val taskId: Long,
+    val date: String,          // yyyy-MM-dd，该任务在这一天被完成
+    val completedAt: Long = System.currentTimeMillis()
+)

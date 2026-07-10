@@ -8,9 +8,10 @@ import androidx.room.RoomDatabase
         NotebookEntity::class,
         TaskEntity::class,
         ReviewEntity::class,
-        ReviewSettingEntity::class
+        ReviewSettingEntity::class,
+        TaskCompletionEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class PlanBookDatabase : RoomDatabase() {
@@ -18,4 +19,5 @@ abstract class PlanBookDatabase : RoomDatabase() {
     abstract fun taskDao(): TaskDao
     abstract fun reviewDao(): ReviewDao
     abstract fun reviewSettingDao(): ReviewSettingDao
+    abstract fun taskCompletionDao(): TaskCompletionDao
 }

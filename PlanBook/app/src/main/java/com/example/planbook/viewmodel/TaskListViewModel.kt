@@ -16,7 +16,9 @@ data class TaskListUiState(
     val currentNotebook: Notebook? = null,
     val selectedDate: LocalDate = LocalDate.now(),
     val tasks: List<Task> = emptyList(),
-    val loaded: Boolean = false
+    val loaded: Boolean = false,
+    val showAddDialog: Boolean = false,
+    val prefillTask: Task? = null
 )
 
 @HiltViewModel
@@ -51,13 +53,33 @@ class TaskListViewModel @Inject constructor(
 
     fun toggleComplete(task: Task) {
         viewModelScope.launch {
-            repository.toggleTaskComplete(task)
+            repository.toggleTaskComplete(task, _uiState.value.selectedDate.toString())
             _uiState.value.currentNotebook?.let { loadDayTasks(it.id, _uiState.value.selectedDate) }
         }
     }
 
-    /** 切月后重新加载（日期不变，只是日历视图切换） */
-    fun refresh() {
-        _uiState.value.currentNotebook?.let { loadDayTasks(it.id, _uiState.value.selectedDate) }
+    /** 点加号：预填选中日期新建任务 */
+    fun showAddDialog() {
+        val date = _uiState.value.selectedDate.toString()
+        val prefill = Task(
+            notebookId = _uiState.value.currentNotebook?.id ?: 0,
+            title = "",
+            type = com.example.planbook.model.TaskType.ONE_OFF,
+            startDate = date,
+            endDate = date
+        )
+        _uiState.update { it.copy(showAddDialog = true, prefillTask = prefill) }
+    }
+
+    fun hideAddDialog() {
+        _uiState.update { it.copy(showAddDialog = false, prefillTask = null) }
+    }
+
+    fun addTask(task: Task) {
+        viewModelScope.launch {
+            repository.addTask(task)
+            _uiState.value.currentNotebook?.let { loadDayTasks(it.id, _uiState.value.selectedDate) }
+            _uiState.update { it.copy(showAddDialog = false, prefillTask = null) }
+        }
     }
 }

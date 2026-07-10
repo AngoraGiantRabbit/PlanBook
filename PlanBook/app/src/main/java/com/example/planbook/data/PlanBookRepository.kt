@@ -164,33 +164,62 @@ class PlanBookRepository @Inject constructor(
 
     suspend fun deleteTask(task: Task) = db.taskDao().delete(task.toEntity())
 
-    suspend fun toggleTaskComplete(task: Task) {
-        val updated = task.copy(
-            isCompleted = !task.isCompleted,
-            completedAt = if (!task.isCompleted) System.currentTimeMillis() else null
-        )
-        db.taskDao().update(updated.toEntity())
+    /**
+     * 切换某任务在某天的完成状态（问题2：跨天任务每天独立完成）。
+     * - 长期任务：用全局 isCompleted（无具体日期概念）
+     * - 其他任务：按日期记录到 task_completions 表
+     */
+    suspend fun toggleTaskComplete(task: Task, date: String) {
+        if (task.type == TaskType.LONG_TERM) {
+            val updated = task.copy(
+                isCompleted = !task.isCompleted,
+                completedAt = if (!task.isCompleted) System.currentTimeMillis() else null
+            )
+            db.taskDao().update(updated.toEntity())
+        } else {
+            val already = db.taskCompletionDao().isCompleted(task.id, date)
+            if (already) {
+                db.taskCompletionDao().delete(task.id, date)
+            } else {
+                db.taskCompletionDao().insert(
+                    TaskCompletionEntity(taskId = task.id, date = date)
+                )
+            }
+        }
     }
 
     suspend fun getTasksForDate(notebookId: Long, date: String): List<Task> =
         db.taskDao().getForDate(notebookId, date).map { it.toModel() }
 
     suspend fun getExpandedTasksForWeek(notebookId: Long, weekStart: LocalDate): List<Task> {
-        val allTasks = db.taskDao().getByNotebook(notebookId).first()
+        val allTasks = db.taskDao().getByNotebook(notebookId).first().map { it.toModel() }
         val weekDays = (0..6).map { weekStart.plusDays(it.toLong()) }
-        return allTasks.flatMap { expandTask(it.toModel(), weekDays) }
+        // 预取本周所有完成记录，避免逐条查询
+        val completedMap = mutableMapOf<String, MutableSet<Long>>()
+        weekDays.forEach { d ->
+            completedMap[d.toString()] = db.taskCompletionDao().getCompletedTaskIds(d.toString()).toMutableSet()
+        }
+        return allTasks.flatMap { expandTaskWithCompletion(it, weekDays, completedMap) }
     }
 
     /** 待办列表页：某一天该显示的所有任务（四类展开后落在该天的，加上长期任务） */
     suspend fun getTasksForDay(notebookId: Long, date: LocalDate): List<Task> {
         val allTasks = db.taskDao().getByNotebook(notebookId).first().map { it.toModel() }
         val dayList = listOf(date)
-        return allTasks.flatMap { expandTask(it, dayList) }
+        val completedIds = db.taskCompletionDao().getCompletedTaskIds(date.toString()).toSet()
+        val completedMap = mapOf(date.toString() to completedIds.toMutableSet())
+        return allTasks.flatMap { expandTaskWithCompletion(it, dayList, completedMap) }
     }
 
-    /** 复盘页：当日已完成任务（PRD 4.4.4） */
-    suspend fun getCompletedTasksForDate(notebookId: Long, date: String): List<Task> =
-        db.taskDao().getCompletedForDate(notebookId, date).map { it.toModel() }
+    /** 复盘页：当日已完成任务（PRD 4.4.4）——含按天完成记录的 */
+    suspend fun getCompletedTasksForDate(notebookId: Long, date: String): List<Task> {
+        val completedIds = db.taskCompletionDao().getCompletedTaskIds(date).toSet()
+        val allTasks = db.taskDao().getByNotebook(notebookId).first().map { it.toModel() }
+        val day = LocalDate.parse(date)
+        // 该天会显示的任务中，已完成的
+        val dayTasks = allTasks.flatMap { expandTaskWithCompletion(it, listOf(day), mapOf(date to completedIds)) }
+        return dayTasks.filter { it.isCompleted }
+    }
 
     /** DDL 未过的长期任务（endDate >= today），按 DDL 升序（PRD 4.4.4） */
     suspend fun getLongTermTasksActive(notebookId: Long, today: String): List<Task> =
@@ -230,6 +259,22 @@ class PlanBookRepository @Inject constructor(
                     )
                 }
             }
+        }
+    }
+
+    /**
+     * 带完成态的展开版本（问题2：每天独立完成）。
+     * 展开后，根据 [completedMap] 设置每个日期副本的 isCompleted。
+     */
+    private fun expandTaskWithCompletion(
+        task: Task,
+        weekDays: List<LocalDate>,
+        completedMap: Map<String, Set<Long>>
+    ): List<Task> {
+        val expanded = expandTask(task, weekDays)
+        return expanded.map { t ->
+            val done = completedMap[t.startDate]?.contains(task.id) == true
+            t.copy(isCompleted = done)
         }
     }
     // endregion

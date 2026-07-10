@@ -194,7 +194,8 @@ class PlanBookViewModel @Inject constructor(
 
     fun toggleTaskComplete(task: Task) {
         viewModelScope.launch {
-            repository.toggleTaskComplete(task)
+            // 展开后的任务 startDate 已是该天；长期任务 startDate 不变
+            repository.toggleTaskComplete(task, task.startDate)
             _uiState.value.currentNotebook?.let { loadTasks(it.id, _uiState.value.weekStart) }
         }
     }

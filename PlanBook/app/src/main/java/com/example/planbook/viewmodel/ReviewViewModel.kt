@@ -96,19 +96,13 @@ class ReviewViewModel @Inject constructor(
         }
     }
 
-    /** 长期任务拆分为临时/灵活任务，原长期保留（PRD 4.4.4） */
-    fun splitLongTermTask(task: Task, asFlex: Boolean) {
+    /** 长期任务拆分：用拆分出的子任务（用户已编辑好的）新建一条，原长期保留（PRD 4.4.4） */
+    fun splitLongTermTask(subTask: Task) {
         val notebook = _calendarState.value.currentNotebook ?: return
         viewModelScope.launch {
-            repository.addTask(
-                task.copy(
-                    id = 0,
-                    notebookId = notebook.id,
-                    type = if (asFlex) TaskType.FLEX else TaskType.ONE_OFF,
-                    startTime = if (asFlex) null else task.startTime,
-                    endTime = if (asFlex) null else task.endTime
-                )
-            )
+            repository.addTask(subTask.copy(id = 0, notebookId = notebook.id))
+            // 刷新编辑页，长期任务列表可能变化
+            openReviewEdit(_editState.value.date)
         }
     }
 }
