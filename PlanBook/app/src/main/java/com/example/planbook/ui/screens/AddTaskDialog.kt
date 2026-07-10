@@ -6,15 +6,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.planbook.model.RepeatRule
 import com.example.planbook.model.Task
 import com.example.planbook.model.TaskType
-import java.time.Instant
 import java.time.LocalDate
-import java.time.ZoneId
 
 /**
  * 复用的任务编辑表单：新建与编辑共用（PRD 4.3.3）。
@@ -268,15 +265,6 @@ fun TaskEditSheet(
     }
 }
 
-private fun parseTime(hhmm: String): Pair<Int, Int>? {
-    if (hhmm.isBlank()) return null
-    val parts = hhmm.split(":")
-    if (parts.size != 2) return null
-    val h = parts[0].toIntOrNull() ?: return null
-    val m = parts[1].toIntOrNull() ?: return null
-    return h to m
-}
-
 private fun h2(startTime: String): Int = parseTime(startTime)?.first?.plus(1) ?: 10
 
 /** 新建任务的便捷入口（保持向后兼容） */
@@ -316,64 +304,4 @@ private fun dayName(day: Int): String = when (day) {
     6 -> "六"
     7 -> "日"
     else -> "?"
-}
-
-/** 日期选择器对话框 */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun DatePickerModal(
-    initial: LocalDate?,
-    onConfirm: (LocalDate) -> Unit,
-    onDismiss: () -> Unit
-) {
-    val state = rememberDatePickerState(
-        initialSelectedDateMillis = initial?.atStartOfDay(ZoneId.systemDefault())?.toInstant()?.toEpochMilli()
-    )
-    DatePickerDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = {
-            TextButton(onClick = {
-                state.selectedDateMillis?.let {
-                    val date = Instant.ofEpochMilli(it)
-                        .atZone(ZoneId.systemDefault())
-                        .toLocalDate()
-                    onConfirm(date)
-                }
-            }) { Text("确定") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        }
-    ) {
-        DatePicker(state = state)
-    }
-}
-
-/** 时间选择器对话框 */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun TimePickerModal(
-    initialHour: Int,
-    initialMinute: Int,
-    onConfirm: (String) -> Unit,
-    onDismiss: () -> Unit
-) {
-    val state = rememberTimePickerState(initialHour = initialHour, initialMinute = initialMinute, is24Hour = true)
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("选择时间") },
-        text = {
-            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                TimePicker(state = state)
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                onConfirm("%02d:%02d".format(state.hour, state.minute))
-            }) { Text("确定") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        }
-    )
 }
