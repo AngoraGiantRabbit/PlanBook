@@ -20,6 +20,8 @@ data class PlanBookUiState(
     val showNotebookSelector: Boolean = false,
     val showAddTaskDialog: Boolean = false,
     val editingTask: Task? = null,
+    /** 新建任务时的预填模板（点空白时段时预填日期+时段，PRD 4.2.2） */
+    val prefillTask: Task? = null,
     val isLoading: Boolean = false
 )
 
@@ -75,19 +77,46 @@ class PlanBookViewModel @Inject constructor(
     }
 
     fun showAddTaskDialog() {
-        _uiState.update { it.copy(showAddTaskDialog = true) }
+        _uiState.update { it.copy(showAddTaskDialog = true, prefillTask = null) }
+    }
+
+    /** 点空白时段时调用：预填日期和时段（PRD 4.2.2） */
+    fun showAddTaskDialogWithPrefill(date: String, startHour: Int) {
+        val prefill = Task(
+            notebookId = _uiState.value.currentNotebook?.id ?: 0,
+            title = "",
+            type = com.example.planbook.model.TaskType.ONE_OFF,
+            startDate = date,
+            endDate = date,
+            startTime = "%02d:00".format(startHour),
+            endTime = "%02d:00".format(startHour + 1)
+        )
+        _uiState.update { it.copy(showAddTaskDialog = true, prefillTask = prefill) }
     }
 
     fun hideAddTaskDialog() {
-        _uiState.update { it.copy(showAddTaskDialog = false) }
+        _uiState.update { it.copy(showAddTaskDialog = false, prefillTask = null) }
     }
 
     fun addTask(task: Task) {
         viewModelScope.launch {
             repository.addTask(task)
             _uiState.value.currentNotebook?.let { loadTasks(it.id, _uiState.value.weekStart) }
-            _uiState.update { it.copy(showAddTaskDialog = false) }
+            _uiState.update { it.copy(showAddTaskDialog = false, prefillTask = null) }
         }
+    }
+
+    /** 翻周：PRD 4.2.1 支持查看不同周 */
+    fun changeWeek(weeksDelta: Long) {
+        val newStart = _uiState.value.weekStart.plusWeeks(weeksDelta)
+        _uiState.update { it.copy(weekStart = newStart) }
+        _uiState.value.currentNotebook?.let { loadTasks(it.id, newStart) }
+    }
+
+    fun goToThisWeek() {
+        val newStart = LocalDate.now().with(WeekFields.of(java.util.Locale.CHINA).dayOfWeek(), 1L)
+        _uiState.update { it.copy(weekStart = newStart) }
+        _uiState.value.currentNotebook?.let { loadTasks(it.id, newStart) }
     }
 
     fun updateTask(task: Task) {

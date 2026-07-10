@@ -1,16 +1,20 @@
 package com.example.planbook.ui.screens
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.planbook.model.RepeatRule
 import com.example.planbook.model.Task
 import com.example.planbook.model.TaskType
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 
 /**
  * 复用的任务编辑表单：新建与编辑共用（PRD 4.3.3）。
@@ -40,6 +44,11 @@ fun TaskEditSheet(
                 ?: setOf(LocalDate.now().dayOfWeek.value)
         )
     }
+    // 选择器弹窗开关（PRD 体验：日期/时间用选择器而非手输）
+    var showStartDatePicker by remember { mutableStateOf(false) }
+    var showEndDatePicker by remember { mutableStateOf(false) }
+    var showStartTimePicker by remember { mutableStateOf(false) }
+    var showEndTimePicker by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -82,34 +91,47 @@ fun TaskEditSheet(
                 }
                 Spacer(modifier = Modifier.height(8.dp))
 
+                // 开始日期（点击唤起 DatePicker）
                 OutlinedTextField(
                     value = startDate,
-                    onValueChange = { startDate = it },
-                    label = { Text("开始日期 yyyy-MM-dd") },
-                    modifier = Modifier.fillMaxWidth()
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("开始日期") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showStartDatePicker = true }
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 OutlinedTextField(
                     value = endDate,
-                    onValueChange = { endDate = it },
-                    label = { Text(if (selectedType == TaskType.LONG_TERM) "截止日期 DDL" else "结束日期 yyyy-MM-dd") },
-                    modifier = Modifier.fillMaxWidth()
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text(if (selectedType == TaskType.LONG_TERM) "截止日期 DDL" else "结束日期") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showEndDatePicker = true }
                 )
 
                 if (selectedType == TaskType.ONE_OFF || selectedType == TaskType.DAILY) {
                     Spacer(modifier = Modifier.height(4.dp))
                     OutlinedTextField(
                         value = startTime,
-                        onValueChange = { startTime = it },
-                        label = { Text("开始时间 HH:mm（可选）") },
-                        modifier = Modifier.fillMaxWidth()
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("开始时间（可选，留空则无时段）") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showStartTimePicker = true }
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     OutlinedTextField(
                         value = endTime,
-                        onValueChange = { endTime = it },
-                        label = { Text("结束时间 HH:mm（可选）") },
-                        modifier = Modifier.fillMaxWidth()
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("结束时间（可选）") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showEndTimePicker = true }
                     )
                 }
 
@@ -197,18 +219,77 @@ fun TaskEditSheet(
             }
         }
     )
+
+    // 日期选择器
+    if (showStartDatePicker) {
+        DatePickerModal(
+            initial = runCatching { LocalDate.parse(startDate) }.getOrNull(),
+            onConfirm = {
+                startDate = it.toString()
+                showStartDatePicker = false
+            },
+            onDismiss = { showStartDatePicker = false }
+        )
+    }
+    if (showEndDatePicker) {
+        DatePickerModal(
+            initial = runCatching { LocalDate.parse(endDate) }.getOrNull(),
+            onConfirm = {
+                endDate = it.toString()
+                showEndDatePicker = false
+            },
+            onDismiss = { showEndDatePicker = false }
+        )
+    }
+    // 时间选择器
+    if (showStartTimePicker) {
+        val (h, m) = parseTime(startTime) ?: 9 to 0
+        TimePickerModal(
+            initialHour = h,
+            initialMinute = m,
+            onConfirm = {
+                startTime = it
+                showStartTimePicker = false
+            },
+            onDismiss = { showStartTimePicker = false }
+        )
+    }
+    if (showEndTimePicker) {
+        val (h, m) = parseTime(endTime) ?: (h2(startTime)) to 0
+        TimePickerModal(
+            initialHour = h,
+            initialMinute = m,
+            onConfirm = {
+                endTime = it
+                showEndTimePicker = false
+            },
+            onDismiss = { showEndTimePicker = false }
+        )
+    }
 }
+
+private fun parseTime(hhmm: String): Pair<Int, Int>? {
+    if (hhmm.isBlank()) return null
+    val parts = hhmm.split(":")
+    if (parts.size != 2) return null
+    val h = parts[0].toIntOrNull() ?: return null
+    val m = parts[1].toIntOrNull() ?: return null
+    return h to m
+}
+
+private fun h2(startTime: String): Int = parseTime(startTime)?.first?.plus(1) ?: 10
 
 /** 新建任务的便捷入口（保持向后兼容） */
 @Composable
 fun AddTaskDialog(
     notebookId: Long,
+    prefill: Task? = null,
     onDismiss: () -> Unit,
     onConfirm: (Task) -> Unit
 ) {
     TaskEditSheet(
         notebookId = notebookId,
-        existing = null,
+        existing = prefill?.copy(id = 0, title = ""),
         onDismiss = onDismiss,
         onConfirm = onConfirm
     )
@@ -235,4 +316,64 @@ private fun dayName(day: Int): String = when (day) {
     6 -> "六"
     7 -> "日"
     else -> "?"
+}
+
+/** 日期选择器对话框 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DatePickerModal(
+    initial: LocalDate?,
+    onConfirm: (LocalDate) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val state = rememberDatePickerState(
+        initialSelectedDateMillis = initial?.atStartOfDay(ZoneId.systemDefault())?.toInstant()?.toEpochMilli()
+    )
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = {
+                state.selectedDateMillis?.let {
+                    val date = Instant.ofEpochMilli(it)
+                        .atZone(ZoneId.systemDefault())
+                        .toLocalDate()
+                    onConfirm(date)
+                }
+            }) { Text("确定") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    ) {
+        DatePicker(state = state)
+    }
+}
+
+/** 时间选择器对话框 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TimePickerModal(
+    initialHour: Int,
+    initialMinute: Int,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val state = rememberTimePickerState(initialHour = initialHour, initialMinute = initialMinute, is24Hour = true)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("选择时间") },
+        text = {
+            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                TimePicker(state = state)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                onConfirm("%02d:%02d".format(state.hour, state.minute))
+            }) { Text("确定") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
 }

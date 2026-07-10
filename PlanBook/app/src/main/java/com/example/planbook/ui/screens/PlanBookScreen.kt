@@ -8,6 +8,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
@@ -35,14 +37,36 @@ fun PlanBookScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    TextButton(onClick = { viewModel.showNotebookSelector() }) {
+                    Column {
+                        TextButton(
+                            onClick = { viewModel.showNotebookSelector() },
+                            contentPadding = PaddingValues(horizontal = 4.dp)
+                        ) {
+                            Text(
+                                text = uiState.currentNotebook?.name ?: "选择计划本",
+                                style = MaterialTheme.typography.titleLarge
+                            )
+                        }
+                        val weekEnd = uiState.weekStart.plusDays(6)
+                        val fmt = DateTimeFormatter.ofPattern("MM/dd")
                         Text(
-                            text = uiState.currentNotebook?.name ?: "选择计划本",
-                            style = MaterialTheme.typography.titleLarge
+                            "${uiState.weekStart.format(fmt)} - ${weekEnd.format(fmt)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(start = 12.dp)
                         )
                     }
                 },
                 actions = {
+                    // 翻周：PRD 4.2.1
+                    IconButton(onClick = { viewModel.changeWeek(-1) }) {
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "上一周")
+                    }
+                    TextButton(onClick = { viewModel.goToThisWeek() }) {
+                        Text("本周")
+                    }
+                    IconButton(onClick = { viewModel.changeWeek(1) }) {
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "下一周")
+                    }
                     IconButton(onClick = { viewModel.refresh() }) {
                         Icon(Icons.Default.Refresh, contentDescription = "刷新")
                     }
@@ -67,7 +91,10 @@ fun PlanBookScreen(
                     tasks = uiState.tasks,
                     weekStart = uiState.weekStart,
                     onToggleComplete = { viewModel.toggleTaskComplete(it) },
-                    onTaskClick = { viewModel.openTaskEditor(it) }
+                    onTaskClick = { viewModel.openTaskEditor(it) },
+                    onCellClick = { date, hour ->
+                        viewModel.showAddTaskDialogWithPrefill(date, hour)
+                    }
                 )
             }
         }
@@ -86,6 +113,7 @@ fun PlanBookScreen(
     if (uiState.showAddTaskDialog) {
         AddTaskDialog(
             notebookId = uiState.currentNotebook?.id ?: 0,
+            prefill = uiState.prefillTask,
             onDismiss = { viewModel.hideAddTaskDialog() },
             onConfirm = { viewModel.addTask(it) }
         )
@@ -122,11 +150,13 @@ fun WeekView(
     tasks: List<Task>,
     weekStart: LocalDate,
     onToggleComplete: (Task) -> Unit,
-    onTaskClick: (Task) -> Unit
+    onTaskClick: (Task) -> Unit,
+    onCellClick: (date: String, hour: Int) -> Unit
 ) {
     val weekDays = (0..6).map { weekStart.plusDays(it.toLong()) }
     val formatter = DateTimeFormatter.ofPattern("MM/dd")
     val weekdayNames = listOf("一", "二", "三", "四", "五", "六", "日")
+    val today = LocalDate.now()
 
     Column(modifier = Modifier.fillMaxSize()) {
         // 表头
@@ -138,7 +168,12 @@ fun WeekView(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text("周${weekdayNames[index]}", style = MaterialTheme.typography.labelSmall)
-                    Text(date.format(formatter), style = MaterialTheme.typography.labelSmall)
+                    Text(
+                        date.format(formatter),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (date == today) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurface
+                    )
                 }
             }
         }
@@ -176,6 +211,12 @@ fun WeekView(
                                     .fillMaxHeight()
                                     .padding(1.dp)
                                     .background(Color.LightGray.copy(alpha = 0.2f))
+                                    // 点击空白时段 → 新建临时任务，预填该时段（PRD 4.2.2）
+                                    .clickable {
+                                        if (cellTasks.isEmpty()) {
+                                            onCellClick(date.toString(), hour)
+                                        }
+                                    }
                             ) {
                                 cellTasks.forEach { task ->
                                     TaskBlock(
