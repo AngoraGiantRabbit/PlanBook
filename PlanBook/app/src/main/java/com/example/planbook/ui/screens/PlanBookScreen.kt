@@ -250,8 +250,13 @@ fun WeekView(
                             }
                         }
                         // 该天有时段的任务
-                        val dayTimedTasks = tasks.filter {
-                            it.startDate == date.toString() && it.startTime != null
+                        // 该天有时段的任务：日期范围覆盖该天（支持跨天任务保留原始范围）
+                        val dayTimedTasks = tasks.filter { task ->
+                            task.startTime != null && runCatching {
+                                val ts = java.time.LocalDate.parse(task.startDate)
+                                val te = java.time.LocalDate.parse(task.endDate)
+                                date in ts..te
+                            }.getOrDefault(false)
                         }
                         // 按开始时间分组，同时段重叠的并列（每个块精确 x 偏移，避免重叠）
                         dayTimedTasks.forEach { task ->
@@ -289,9 +294,13 @@ fun WeekView(
             }
         }
 
-        // 灵活待办区域：只显示选中那一天的灵活任务（标题带日期）
+        // 灵活待办区域：只显示选中那一天覆盖到的灵活任务（支持跨天范围）
         val flexTasks = tasks.filter {
-            it.type == com.example.planbook.model.TaskType.FLEX && it.startDate == selectedDate.toString()
+            it.type == com.example.planbook.model.TaskType.FLEX && runCatching {
+                val ts = java.time.LocalDate.parse(it.startDate)
+                val te = java.time.LocalDate.parse(it.endDate)
+                selectedDate in ts..te
+            }.getOrDefault(false)
         }
         FlexibleTaskArea(
             title = "灵活待办 (${selectedDate.format(formatter)})",

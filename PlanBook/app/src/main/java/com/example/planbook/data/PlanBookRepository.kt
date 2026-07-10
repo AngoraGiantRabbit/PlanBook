@@ -165,12 +165,14 @@ class PlanBookRepository @Inject constructor(
     suspend fun deleteTask(task: Task) = db.taskDao().delete(task.toEntity())
 
     /**
-     * 切换某任务在某天的完成状态（问题2：跨天任务每天独立完成）。
-     * - 长期任务：用全局 isCompleted（无具体日期概念）
-     * - 其他任务：按日期记录到 task_completions 表
+     * 切换某任务的完成状态。
+     * - 长期任务 / 跨多天临时/灵活任务：整体完成，用全局 isCompleted
+     * - 每日任务 / 单天任务：按日期记录到 task_completions（每天独立）
      */
     suspend fun toggleTaskComplete(task: Task, date: String) {
-        if (task.type == TaskType.LONG_TERM) {
+        val isMultiDay = (task.type == TaskType.ONE_OFF || task.type == TaskType.FLEX) &&
+            task.startDate != task.endDate
+        if (task.type == TaskType.LONG_TERM || isMultiDay) {
             val updated = task.copy(
                 isCompleted = !task.isCompleted,
                 completedAt = if (!task.isCompleted) System.currentTimeMillis() else null
@@ -235,8 +237,10 @@ class PlanBookRepository @Inject constructor(
         }
         val start = LocalDate.parse(task.startDate)
         val end = LocalDate.parse(task.endDate)
+        val isMultiDay = !start.isEqual(end)
         return when (task.type) {
             TaskType.DAILY -> {
+                // 每日任务：每天独立，copy 成单天
                 weekDays.filter { date ->
                     date in start..end && when (task.repeatRule) {
                         RepeatRule.EVERY_DAY -> true
@@ -247,27 +251,29 @@ class PlanBookRepository @Inject constructor(
                         null -> false
                     }
                 }.map { date ->
-                    task.copy(
-                        startDate = date.toString(),
-                        endDate = date.toString()
-                    )
+                    task.copy(startDate = date.toString(), endDate = date.toString())
                 }
             }
-            // 跨天任务在周内每一天显示（PRD 4.2.1：跨天的任务跨格显示）
-            else -> {
-                weekDays.filter { it in start..end }.map { date ->
-                    task.copy(
-                        startDate = date.toString(),
-                        endDate = date.toString()
-                    )
+            // 临时/灵活任务：跨天时是连贯整体，每天列显示但保留原始时间范围（不做单天 copy）
+            TaskType.ONE_OFF, TaskType.FLEX -> {
+                if (isMultiDay) {
+                    // 跨多天：在范围内的每天生成一个副本（用于渲染到对应列），
+                    // 但保留原始 startDate/endDate/startTime/endTime，完成态整体共享
+                    weekDays.filter { it in start..end }.map { task }
+                } else {
+                    // 单天：正常 copy
+                    listOf(task)
                 }
             }
+            TaskType.LONG_TERM -> listOf(task) // 不会到达，开头已 early return
         }
     }
 
     /**
-     * 带完成态的展开版本（问题2：每天独立完成）。
-     * 展开后，根据 [completedMap] 设置每个日期副本的 isCompleted。
+     * 带完成态的展开版本。
+     * - DAILY：每天独立完成，按 completedMap 查
+     * - ONE_OFF/FLEX 跨多天：连贯整体，完成态全局共享（用 task.isCompleted）
+     * - 其他：按天查 completedMap
      */
     private fun expandTaskWithCompletion(
         task: Task,
@@ -275,8 +281,15 @@ class PlanBookRepository @Inject constructor(
         completedMap: Map<String, Set<Long>>
     ): List<Task> {
         val expanded = expandTask(task, weekDays)
+        // 跨多天的临时/灵活任务是整体，完成态直接用全局 isCompleted
+        val isMultiDayTimed = (task.type == TaskType.ONE_OFF || task.type == TaskType.FLEX) &&
+            !LocalDate.parse(task.startDate).isEqual(LocalDate.parse(task.endDate))
         return expanded.map { t ->
-            val done = completedMap[t.startDate]?.contains(task.id) == true
+            val done = if (isMultiDayTimed) {
+                task.isCompleted
+            } else {
+                completedMap[t.startDate]?.contains(task.id) == true
+            }
             t.copy(isCompleted = done)
         }
     }
