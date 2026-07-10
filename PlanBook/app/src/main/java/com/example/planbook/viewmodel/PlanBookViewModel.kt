@@ -76,6 +76,37 @@ class PlanBookViewModel @Inject constructor(
         _uiState.update { it.copy(showNotebookSelector = false) }
     }
 
+    /** 重命名计划本（PRD 4.1.3） */
+    fun renameNotebook(notebook: Notebook, newName: String) {
+        viewModelScope.launch {
+            repository.renameNotebook(notebook.copy(name = newName))
+        }
+    }
+
+    /** 删除计划本：至少保留一个；删除当前计划本时自动切换到第一个（PRD 4.1） */
+    fun deleteNotebook(notebook: Notebook) {
+        viewModelScope.launch {
+            if (_uiState.value.notebooks.size <= 1) return@launch
+            repository.deleteNotebook(notebook)
+            // 若删除的是当前计划本，切到剩余的第一个
+            if (_uiState.value.currentNotebook?.id == notebook.id) {
+                val remaining = _uiState.value.notebooks.firstOrNull { it.id != notebook.id }
+                remaining?.let { repository.switchCurrentNotebook(it.id) }
+            }
+        }
+    }
+
+    /** 检测两个计划本的带时段任务冲突（PRD 4.1.4） */
+    suspend fun detectMergeConflicts(a: Long, b: Long) =
+        repository.detectMergeConflicts(a, b)
+
+    /** 执行合并（PRD 4.1.4） */
+    fun executeMerge(a: Long, b: Long, newName: String, resolutions: Map<Long, com.example.planbook.model.MergeResolution>) {
+        viewModelScope.launch {
+            repository.executeMerge(a, b, newName, resolutions)
+        }
+    }
+
     fun showAddTaskDialog() {
         _uiState.update { it.copy(showAddTaskDialog = true, prefillTask = null) }
     }

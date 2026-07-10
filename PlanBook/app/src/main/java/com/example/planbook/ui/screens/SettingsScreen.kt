@@ -22,6 +22,7 @@ import com.example.planbook.viewmodel.SettingsViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
+    onManageNotebooks: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -55,6 +56,13 @@ fun SettingsScreen(
                     onTimeChange = { s, e -> viewModel.setReviewTime(setting.reviewType, s, e) }
                 )
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+            Text("计划本", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(onClick = onManageNotebooks, modifier = Modifier.fillMaxWidth()) {
+                Text("计划本管理（重命名 / 删除 / 合并）")
             }
         }
     }

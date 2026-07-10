@@ -20,6 +20,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.example.planbook.ui.screens.NotebookManagerScreen
 import com.example.planbook.ui.screens.PlanBookScreen
 import com.example.planbook.ui.screens.ReviewEditScreen
 import com.example.planbook.ui.screens.ReviewScreen
@@ -71,10 +72,15 @@ fun PlanBookApp() {
                     navController.navigate("review_edit/$date")
                 })
             }
-            composable(Screen.Settings.route) { SettingsScreen() }
+            composable(Screen.Settings.route) {
+                SettingsScreen(onManageNotebooks = { navController.navigate("notebook_manager") })
+            }
             composable("review_edit/{date}") { backStackEntry ->
                 val date = backStackEntry.arguments?.getString("date") ?: ""
                 ReviewEditScreen(date = date, onBack = { navController.popBackStack() })
+            }
+            composable("notebook_manager") {
+                NotebookManagerScreen(onBack = { navController.popBackStack() })
             }
         }
     }
