@@ -165,20 +165,13 @@ class PlanBookRepository @Inject constructor(
     suspend fun deleteTask(task: Task) = db.taskDao().delete(task.toEntity())
 
     /**
-     * 切换某任务的完成状态。
-     * - 长期任务 / 跨多天临时/灵活任务：整体完成，用全局 isCompleted
-     * - 每日任务 / 单天任务：按日期记录到 task_completions（每天独立）
+     * 切换某任务的完成状态（ADR-0001 完成态双模型）。
+     * - DAILY：按天记录到 task_completions（每天独立）
+     * - 其它（ONE_OFF / FLEX / LONG_TERM）：整体完成，用全局 isCompleted
+     * 分流只看 type，不看「是否跨多天」。
      */
     suspend fun toggleTaskComplete(task: Task, date: String) {
-        val isMultiDay = (task.type == TaskType.ONE_OFF || task.type == TaskType.FLEX) &&
-            task.startDate != task.endDate
-        if (task.type == TaskType.LONG_TERM || isMultiDay) {
-            val updated = task.copy(
-                isCompleted = !task.isCompleted,
-                completedAt = if (!task.isCompleted) System.currentTimeMillis() else null
-            )
-            db.taskDao().update(updated.toEntity())
-        } else {
+        if (task.type == TaskType.DAILY) {
             val already = db.taskCompletionDao().isCompleted(task.id, date)
             if (already) {
                 db.taskCompletionDao().delete(task.id, date)
@@ -187,6 +180,12 @@ class PlanBookRepository @Inject constructor(
                     TaskCompletionEntity(taskId = task.id, date = date)
                 )
             }
+        } else {
+            val updated = task.copy(
+                isCompleted = !task.isCompleted,
+                completedAt = if (!task.isCompleted) System.currentTimeMillis() else null
+            )
+            db.taskDao().update(updated.toEntity())
         }
     }
 
@@ -270,10 +269,10 @@ class PlanBookRepository @Inject constructor(
     }
 
     /**
-     * 带完成态的展开版本。
-     * - DAILY：每天独立完成，按 completedMap 查
-     * - ONE_OFF/FLEX 跨多天：连贯整体，完成态全局共享（用 task.isCompleted）
-     * - 其他：按天查 completedMap
+     * 带完成态的展开版本（ADR-0001 完成态双模型）。
+     * - DAILY：按天独立完成，按 completedMap 查
+     * - 其它（ONE_OFF / FLEX / LONG_TERM）：整体完成态，直接用 task.isCompleted
+     * 分流只看 type。
      */
     private fun expandTaskWithCompletion(
         task: Task,
@@ -281,14 +280,11 @@ class PlanBookRepository @Inject constructor(
         completedMap: Map<String, Set<Long>>
     ): List<Task> {
         val expanded = expandTask(task, weekDays)
-        // 跨多天的临时/灵活任务是整体，完成态直接用全局 isCompleted
-        val isMultiDayTimed = (task.type == TaskType.ONE_OFF || task.type == TaskType.FLEX) &&
-            !LocalDate.parse(task.startDate).isEqual(LocalDate.parse(task.endDate))
         return expanded.map { t ->
-            val done = if (isMultiDayTimed) {
-                task.isCompleted
-            } else {
+            val done = if (task.type == TaskType.DAILY) {
                 completedMap[t.startDate]?.contains(task.id) == true
+            } else {
+                task.isCompleted
             }
             t.copy(isCompleted = done)
         }
