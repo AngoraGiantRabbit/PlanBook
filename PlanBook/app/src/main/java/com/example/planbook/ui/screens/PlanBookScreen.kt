@@ -29,6 +29,7 @@ import java.time.format.DateTimeFormatter
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlanBookScreen(
+    onOpenReview: (String) -> Unit,
     viewModel: PlanBookViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -91,7 +92,14 @@ fun PlanBookScreen(
                     tasks = uiState.tasks,
                     weekStart = uiState.weekStart,
                     onToggleComplete = { viewModel.toggleTaskComplete(it) },
-                    onTaskClick = { viewModel.openTaskEditor(it) },
+                    onTaskClick = { task ->
+                        // 自动复盘待办点击进入复盘编辑页（PRD 4.4.1）
+                        if (task.isAutoReview) {
+                            onOpenReview(task.startDate)
+                        } else {
+                            viewModel.openTaskEditor(task)
+                        }
+                    },
                     onCellClick = { date, hour ->
                         viewModel.showAddTaskDialogWithPrefill(date, hour)
                     }

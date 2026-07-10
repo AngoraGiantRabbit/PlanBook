@@ -66,7 +66,11 @@ fun PlanBookApp() {
             startDestination = Screen.PlanBook.route,
             modifier = Modifier.padding(innerPadding)
         ) {
-            composable(Screen.PlanBook.route) { PlanBookScreen() }
+            composable(Screen.PlanBook.route) {
+                PlanBookScreen(onOpenReview = { date ->
+                    navController.navigate("review_edit/$date")
+                })
+            }
             composable(Screen.Review.route) {
                 ReviewScreen(onOpenReview = { date ->
                     navController.navigate("review_edit/$date")
