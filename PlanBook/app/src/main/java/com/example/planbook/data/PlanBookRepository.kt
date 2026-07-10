@@ -337,6 +337,11 @@ class PlanBookRepository @Inject constructor(
 
     // region Auto review tasks generation
     suspend fun ensureAutoReviewTasks(notebookId: Long, weekStart: LocalDate) {
+        // 清理历史重复生成的复盘任务（保留每组最早一条）
+        val dupIds = db.taskDao().getDuplicateAutoReviewIds()
+        if (dupIds.isNotEmpty()) {
+            dupIds.forEach { db.taskDao().deleteById(it) }
+        }
         val settings = getReviewSettings(notebookId).first()
         val weekDays = (0..6).map { weekStart.plusDays(it.toLong()) }
 
@@ -355,8 +360,8 @@ class PlanBookRepository @Inject constructor(
                     ReviewType.WEEKLY -> "📝 每周复盘"
                     ReviewType.MONTHLY -> "📝 每月复盘"
                 }
-                val existing = db.taskDao().getForDate(notebookId, date.toString())
-                    .any { it.isAutoReview && it.reviewType == setting.reviewType.name }
+                // 精确查重：notebookId + reviewType + startDate（避免重复生成）
+                val existing = db.taskDao().hasAutoReview(notebookId, setting.reviewType.name, date.toString())
                 if (!existing && setting.enabled) {
                     db.taskDao().insert(
                         TaskEntity(

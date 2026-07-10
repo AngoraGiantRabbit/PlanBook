@@ -50,6 +50,17 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE id = :taskId LIMIT 1")
     suspend fun getById(taskId: Long): TaskEntity?
 
+    /** 精确查重：某计划本在某天是否已有某类型的自动复盘任务 */
+    @Query("SELECT EXISTS(SELECT 1 FROM tasks WHERE notebookId = :notebookId AND isAutoReview = 1 AND reviewType = :reviewType AND startDate = :date)")
+    suspend fun hasAutoReview(notebookId: Long, reviewType: String, date: String): Boolean
+
+    /** 查询重复的自动复盘任务（同 notebookId+reviewType+startDate 超过1条的），返回需要删除的 id */
+    @Query("SELECT id FROM tasks WHERE isAutoReview = 1 AND id NOT IN (SELECT MIN(id) FROM tasks WHERE isAutoReview = 1 GROUP BY notebookId, reviewType, startDate)")
+    suspend fun getDuplicateAutoReviewIds(): List<Long>
+
+    @Query("DELETE FROM tasks WHERE id = :taskId")
+    suspend fun deleteById(taskId: Long)
+
     @Insert
     suspend fun insert(task: TaskEntity): Long
 
