@@ -232,12 +232,13 @@ fun WeekView(
                 }
                 // 7 天的列
                 weekDays.forEach { date ->
-                    Box(
+                    BoxWithConstraints(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxHeight()
                             .background(Color.LightGray.copy(alpha = 0.15f))
                     ) {
+                        val columnWidthPx = maxWidth.value // dp
                         // 背景网格线
                         Column(modifier = Modifier.fillMaxSize()) {
                             for (h in startHourRange until endHourRange) {
@@ -252,7 +253,7 @@ fun WeekView(
                         val dayTimedTasks = tasks.filter {
                             it.startDate == date.toString() && it.startTime != null
                         }
-                        // 按开始时间分组，同时段重叠的并列
+                        // 按开始时间分组，同时段重叠的并列（每个块精确 x 偏移，避免重叠）
                         dayTimedTasks.forEach { task ->
                             val startMin = timeToMinutes(task.startTime!!) - startHourRange * 60
                             val endMin = timeToMinutes(task.endTime ?: task.startTime) - startHourRange * 60
@@ -265,8 +266,9 @@ fun WeekView(
                             }
                             val idx = overlapping.indexOf(task)
                             val count = overlapping.size
+                            val blockWidth = (columnWidthPx / count) // dp
                             val density = androidx.compose.ui.platform.LocalDensity.current
-                            val offsetDp = with(density) {
+                            val yOffset = with(density) {
                                 (startMin * (hourHeight.value / 60f)).dp
                             }
                             val heightDp = with(density) {
@@ -275,9 +277,9 @@ fun WeekView(
                             TaskBlock(
                                 task = task,
                                 modifier = Modifier
-                                    .offset(y = offsetDp)
-                                    .fillMaxWidth(1f / count)
-                                    .padding(start = (idx * 2).dp, end = 1.dp)
+                                    .offset(x = with(density) { (idx * blockWidth).dp }, y = yOffset)
+                                    .width(with(density) { blockWidth.dp })
+                                    .padding(end = 1.dp)
                                     .height(heightDp),
                                 onClick = { onTaskClick(task) }
                             )
