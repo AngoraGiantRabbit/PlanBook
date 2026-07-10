@@ -17,6 +17,8 @@ data class PlanBookUiState(
     val currentNotebook: Notebook? = null,
     val tasks: List<Task> = emptyList(),
     val weekStart: LocalDate = LocalDate.now().with(WeekFields.of(java.util.Locale.CHINA).dayOfWeek(), 1L),
+    /** 周视图底部"灵活待办"区选中的某一天（默认今天） */
+    val selectedDate: LocalDate = LocalDate.now(),
     val showNotebookSelector: Boolean = false,
     val showAddTaskDialog: Boolean = false,
     val editingTask: Task? = null,
@@ -49,9 +51,13 @@ class PlanBookViewModel @Inject constructor(
 
     private fun loadTasks(notebookId: Long, weekStart: LocalDate) {
         viewModelScope.launch {
-            repository.ensureAutoReviewTasks(notebookId, weekStart)
-            val tasks = repository.getExpandedTasksForWeek(notebookId, weekStart)
-            _uiState.update { it.copy(tasks = tasks) }
+            try {
+                repository.ensureAutoReviewTasks(notebookId, weekStart)
+                val tasks = repository.getExpandedTasksForWeek(notebookId, weekStart)
+                _uiState.update { it.copy(tasks = tasks) }
+            } catch (e: Exception) {
+                android.util.Log.e("PlanBook", "loadTasks 失败", e)
+            }
         }
     }
 
@@ -140,14 +146,21 @@ class PlanBookViewModel @Inject constructor(
     /** 翻周：PRD 4.2.1 支持查看不同周 */
     fun changeWeek(weeksDelta: Long) {
         val newStart = _uiState.value.weekStart.plusWeeks(weeksDelta)
-        _uiState.update { it.copy(weekStart = newStart) }
+        // 选中日跟随移动（保持星期几不变）
+        val newSelected = _uiState.value.selectedDate.plusWeeks(weeksDelta)
+        _uiState.update { it.copy(weekStart = newStart, selectedDate = newSelected) }
         _uiState.value.currentNotebook?.let { loadTasks(it.id, newStart) }
     }
 
     fun goToThisWeek() {
         val newStart = LocalDate.now().with(WeekFields.of(java.util.Locale.CHINA).dayOfWeek(), 1L)
-        _uiState.update { it.copy(weekStart = newStart) }
+        _uiState.update { it.copy(weekStart = newStart, selectedDate = LocalDate.now()) }
         _uiState.value.currentNotebook?.let { loadTasks(it.id, newStart) }
+    }
+
+    /** 选择周视图底部的某一天（灵活待办按天显示） */
+    fun selectDate(date: LocalDate) {
+        _uiState.update { it.copy(selectedDate = date) }
     }
 
     fun updateTask(task: Task) {

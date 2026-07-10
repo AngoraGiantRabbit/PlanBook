@@ -181,15 +181,26 @@ class PlanBookRepository @Inject constructor(
         return allTasks.flatMap { expandTask(it.toModel(), weekDays) }
     }
 
+    /** 待办列表页：某一天该显示的所有任务（四类展开后落在该天的，加上长期任务） */
+    suspend fun getTasksForDay(notebookId: Long, date: LocalDate): List<Task> {
+        val allTasks = db.taskDao().getByNotebook(notebookId).first().map { it.toModel() }
+        val dayList = listOf(date)
+        return allTasks.flatMap { expandTask(it, dayList) }
+    }
+
     /** 复盘页：当日已完成任务（PRD 4.4.4） */
     suspend fun getCompletedTasksForDate(notebookId: Long, date: String): List<Task> =
         db.taskDao().getCompletedForDate(notebookId, date).map { it.toModel() }
 
-    /** 复盘页：DDL 在当前日期之前或临近的长期任务（PRD 4.4.4） */
-    suspend fun getLongTermTasksDueBy(notebookId: Long, deadline: String): List<Task> =
-        db.taskDao().getLongTermUntil(notebookId, deadline).map { it.toModel() }
+    /** DDL 未过的长期任务（endDate >= today），按 DDL 升序（PRD 4.4.4） */
+    suspend fun getLongTermTasksActive(notebookId: Long, today: String): List<Task> =
+        db.taskDao().getLongTermActive(notebookId, today).map { it.toModel() }
 
     private fun expandTask(task: Task, weekDays: List<LocalDate>): List<Task> {
+        // 长期任务只有 DDL，不参与按周过滤，始终单独返回（底部长期待办栏显示）
+        if (task.type == TaskType.LONG_TERM) {
+            return listOf(task)
+        }
         val start = LocalDate.parse(task.startDate)
         val end = LocalDate.parse(task.endDate)
         return when (task.type) {

@@ -71,9 +71,8 @@ class ReviewViewModel @Inject constructor(
         viewModelScope.launch {
             val review = repository.getReview(notebook.id, date)
             val completed = repository.getCompletedTasksForDate(notebook.id, date)
-            // DDL 在当前日期之前或临近（含当天后7天）的长期任务
-            val nearDeadline = LocalDate.parse(date).plusDays(7).toString()
-            val longTerm = repository.getLongTermTasksDueBy(notebook.id, nearDeadline)
+            // DDL 未过的长期任务（PRD 4.4.4：待细化）
+            val longTerm = repository.getLongTermTasksActive(notebook.id, date)
             _editState.update {
                 it.copy(
                     content = review?.content ?: "",

@@ -16,6 +16,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
@@ -91,6 +92,8 @@ fun PlanBookScreen(
                 WeekView(
                     tasks = uiState.tasks,
                     weekStart = uiState.weekStart,
+                    selectedDate = uiState.selectedDate,
+                    onSelectDate = { viewModel.selectDate(it) },
                     onToggleComplete = { viewModel.toggleTaskComplete(it) },
                     onTaskClick = { task ->
                         // 自动复盘待办点击进入复盘编辑页（PRD 4.4.1）
@@ -157,6 +160,8 @@ fun EmptyNotebookState(onCreate: () -> Unit) {
 fun WeekView(
     tasks: List<Task>,
     weekStart: LocalDate,
+    selectedDate: LocalDate,
+    onSelectDate: (LocalDate) -> Unit,
     onToggleComplete: (Task) -> Unit,
     onTaskClick: (Task) -> Unit,
     onCellClick: (date: String, hour: Int) -> Unit
@@ -167,20 +172,33 @@ fun WeekView(
     val today = LocalDate.now()
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // 表头
+        // 表头（可点击选中某一天）
         Row(modifier = Modifier.fillMaxWidth()) {
             Box(modifier = Modifier.width(48.dp)) { }
             weekDays.forEachIndexed { index, date ->
                 Column(
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(MaterialTheme.shapes.small)
+                        .background(
+                            if (date == selectedDate) MaterialTheme.colorScheme.primaryContainer
+                            else Color.Transparent
+                        )
+                        .clickable { onSelectDate(date) }
+                        .padding(vertical = 2.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text("周${weekdayNames[index]}", style = MaterialTheme.typography.labelSmall)
                     Text(
                         date.format(formatter),
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (date == today) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurface
+                        color = when (date) {
+                            selectedDate -> MaterialTheme.colorScheme.primary
+                            today -> MaterialTheme.colorScheme.primary
+                            else -> MaterialTheme.colorScheme.onSurface
+                        },
+                        fontWeight = if (date == selectedDate) androidx.compose.ui.text.font.FontWeight.Bold
+                        else androidx.compose.ui.text.font.FontWeight.Normal
                     )
                 }
             }
@@ -209,7 +227,6 @@ fun WeekView(
                         weekDays.forEach { date ->
                             val cellTasks = tasks.filter {
                                 it.startDate == date.toString() &&
-                                !it.isCompleted &&
                                 it.startTime != null &&
                                 it.startTime.startsWith("%02d".format(hour))
                             }
@@ -240,9 +257,21 @@ fun WeekView(
             }
         }
 
-        // 灵活待办区域
+        // 灵活待办区域：只显示选中那一天的灵活任务（标题带日期）
+        val flexTasks = tasks.filter {
+            it.type == com.example.planbook.model.TaskType.FLEX && it.startDate == selectedDate.toString()
+        }
         FlexibleTaskArea(
-            tasks = tasks.filter { it.startTime == null || it.type.name == "FLEX" || it.type.name == "LONG_TERM" },
+            title = "灵活待办 (${selectedDate.format(formatter)})",
+            tasks = flexTasks,
+            onToggleComplete = onToggleComplete,
+            onTaskClick = onTaskClick
+        )
+
+        // 长期待办区域：DDL 未过的长期任务（独立栏，带勾选）
+        val longTermTasks = tasks.filter { it.type == com.example.planbook.model.TaskType.LONG_TERM }
+        LongTermTaskArea(
+            tasks = longTermTasks,
             onToggleComplete = onToggleComplete,
             onTaskClick = onTaskClick
         )
@@ -255,19 +284,22 @@ fun TaskBlock(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
-    val color = when (task.reviewType) {
+    val baseColor = when (task.reviewType) {
         null -> MaterialTheme.colorScheme.primaryContainer
         else -> MaterialTheme.colorScheme.tertiaryContainer
     }
+    // 已完成任务变透明（PRD：完成态更透明），留原位
+    val alpha = if (task.isCompleted) 0.35f else 1f
     Box(
         modifier = modifier
             .padding(2.dp)
-            .background(color)
+            .background(baseColor.copy(alpha = alpha))
             .clickable(onClick = onClick)
     ) {
         Text(
             text = task.title,
             style = MaterialTheme.typography.labelSmall,
+            textDecoration = if (task.isCompleted) TextDecoration.LineThrough else TextDecoration.None,
             modifier = Modifier.padding(2.dp)
         )
     }
@@ -275,6 +307,7 @@ fun TaskBlock(
 
 @Composable
 fun FlexibleTaskArea(
+    title: String,
     tasks: List<Task>,
     onToggleComplete: (Task) -> Unit,
     onTaskClick: (Task) -> Unit
@@ -286,9 +319,9 @@ fun FlexibleTaskArea(
             .fillMaxWidth()
             .padding(8.dp)
     ) {
-        Text("灵活待办", style = MaterialTheme.typography.titleSmall)
+        Text(title, style = MaterialTheme.typography.titleSmall)
         Spacer(modifier = Modifier.height(4.dp))
-        LazyColumn(modifier = Modifier.heightIn(max = 160.dp)) {
+        LazyColumn(modifier = Modifier.heightIn(max = 140.dp)) {
             items(uncompleted) { task ->
                 FlexibleTaskItem(
                     task = task,
@@ -332,6 +365,67 @@ fun FlexibleTaskItem(
             color = if (isCompleted) Color.Gray else Color.Unspecified,
             textDecoration = if (isCompleted) TextDecoration.LineThrough else TextDecoration.None,
             modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+/** 长期待办区：DDL 未过的长期任务，独立栏带勾选框，显示 DDL 日期 */
+@Composable
+fun LongTermTaskArea(
+    tasks: List<Task>,
+    onToggleComplete: (Task) -> Unit,
+    onTaskClick: (Task) -> Unit
+) {
+    val (completed, uncompleted) = tasks.partition { it.isCompleted }
+    if (tasks.isEmpty()) return
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp)
+    ) {
+        Text("长期待办", style = MaterialTheme.typography.titleSmall)
+        Spacer(modifier = Modifier.height(4.dp))
+        LazyColumn(modifier = Modifier.heightIn(max = 120.dp)) {
+            items(uncompleted) { task ->
+                LongTermTaskItem(task, onToggle = { onToggleComplete(task) }, onClick = { onTaskClick(task) })
+            }
+            items(completed) { task ->
+                LongTermTaskItem(task, onToggle = { onToggleComplete(task) }, onClick = { onTaskClick(task) }, isCompleted = true)
+            }
+        }
+    }
+}
+
+@Composable
+fun LongTermTaskItem(
+    task: Task,
+    onToggle: () -> Unit,
+    onClick: () -> Unit,
+    isCompleted: Boolean = false
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Checkbox(
+            checked = isCompleted,
+            onCheckedChange = { onToggle() }
+        )
+        Text(
+            text = task.title,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (isCompleted) Color.Gray else Color.Unspecified,
+            textDecoration = if (isCompleted) TextDecoration.LineThrough else TextDecoration.None,
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            text = "DDL ${task.endDate}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }

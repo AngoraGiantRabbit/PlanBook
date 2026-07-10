@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.FormatListBulleted
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -25,9 +26,11 @@ import com.example.planbook.ui.screens.PlanBookScreen
 import com.example.planbook.ui.screens.ReviewEditScreen
 import com.example.planbook.ui.screens.ReviewScreen
 import com.example.planbook.ui.screens.SettingsScreen
+import com.example.planbook.ui.screens.TaskListScreen
 
 sealed class Screen(val route: String, val title: String, val icon: ImageVector) {
     data object PlanBook : Screen("planbook", "计划本", Icons.Default.CheckCircle)
+    data object TaskList : Screen("tasklist", "待办", Icons.Default.FormatListBulleted)
     data object Review : Screen("review", "复盘", Icons.Default.CalendarMonth)
     data object Settings : Screen("settings", "设置", Icons.Default.Settings)
 }
@@ -35,7 +38,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
 @Composable
 fun PlanBookApp() {
     val navController = rememberNavController()
-    val items = listOf(Screen.PlanBook, Screen.Review, Screen.Settings)
+    val items = listOf(Screen.PlanBook, Screen.TaskList, Screen.Review, Screen.Settings)
 
     Scaffold(
         bottomBar = {
@@ -71,6 +74,7 @@ fun PlanBookApp() {
                     navController.navigate("review_edit/$date")
                 })
             }
+            composable(Screen.TaskList.route) { TaskListScreen() }
             composable(Screen.Review.route) {
                 ReviewScreen(onOpenReview = { date ->
                     navController.navigate("review_edit/$date")
