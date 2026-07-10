@@ -204,6 +204,9 @@ class PlanBookRepository @Inject constructor(
 
     /** 待办列表页：某一天该显示的所有任务（四类展开后落在该天的，加上长期任务） */
     suspend fun getTasksForDay(notebookId: Long, date: LocalDate): List<Task> {
+        // 确保复盘自动待办已生成（与课表页保持一致，问题6）
+        val weekStart = date.with(java.time.DayOfWeek.MONDAY)
+        ensureAutoReviewTasks(notebookId, weekStart)
         val allTasks = db.taskDao().getByNotebook(notebookId).first().map { it.toModel() }
         val dayList = listOf(date)
         val completedIds = db.taskCompletionDao().getCompletedTaskIds(date.toString()).toSet()
