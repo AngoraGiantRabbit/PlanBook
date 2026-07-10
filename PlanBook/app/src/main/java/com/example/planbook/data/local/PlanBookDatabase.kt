@@ -10,7 +10,7 @@ import androidx.room.RoomDatabase
         ReviewEntity::class,
         ReviewSettingEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class PlanBookDatabase : RoomDatabase() {

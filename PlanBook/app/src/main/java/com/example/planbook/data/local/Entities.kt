@@ -1,6 +1,7 @@
 package com.example.planbook.data.local
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
 @Entity(tableName = "notebooks")
@@ -43,7 +44,10 @@ data class ReviewEntity(
     val updatedAt: Long = System.currentTimeMillis()
 )
 
-@Entity(tableName = "review_settings")
+@Entity(
+    tableName = "review_settings",
+    indices = [Index(value = ["notebookId", "reviewType"], unique = true)]
+)
 data class ReviewSettingEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,

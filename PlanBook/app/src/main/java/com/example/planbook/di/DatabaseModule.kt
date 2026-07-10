@@ -21,6 +21,6 @@ object DatabaseModule {
             context,
             PlanBookDatabase::class.java,
             "planbook.db"
-        ).build()
+        ).fallbackToDestructiveMigration().build()
     }
 }

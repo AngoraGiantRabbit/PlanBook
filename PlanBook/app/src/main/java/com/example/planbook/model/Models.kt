@@ -60,3 +60,9 @@ data class ReviewSetting(
     val startTime: String,     // HH:mm
     val endTime: String        // HH:mm
 )
+
+/** 合并计划本时的时段冲突任务对（PRD 4.1.4） */
+data class MergeConflict(val taskA: Task, val taskB: Task)
+
+/** 冲突任务的处理结果 */
+enum class MergeResolution { KEEP_A, KEEP_B, DROP }

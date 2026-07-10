@@ -41,6 +41,115 @@ class PlanBookRepository @Inject constructor(
     suspend fun deleteNotebook(notebook: Notebook) {
         db.notebookDao().delete(notebook.toEntity())
     }
+
+    /**
+     * 合并两个计划本（PRD 4.1.4）。
+     * 流程：
+     * 1. 先调 [detectMergeConflicts] 取得带时段任务的冲突列表。
+     * 2. UI 逐条让用户选择。
+     * 3. 再调 [executeMerge] 完成合并。
+     * 原两个计划本保留不变。
+     */
+
+    /** 检测两个计划本之间带时段任务的冲突。返回冲突任务对。 */
+    suspend fun detectMergeConflicts(
+        notebookA: Long,
+        notebookB: Long
+    ): List<MergeConflict> {
+        val timedA = db.taskDao().getAllOnce(notebookA)
+            .map { it.toModel() }
+            .filter { it.startTime != null }
+        val timedB = db.taskDao().getAllOnce(notebookB)
+            .map { it.toModel() }
+            .filter { it.startTime != null }
+
+        val conflicts = mutableListOf<MergeConflict>()
+        for (a in timedA) for (b in timedB) {
+            if (tasksOverlap(a, b)) {
+                conflicts.add(MergeConflict(a, b))
+            }
+        }
+        return conflicts
+    }
+
+    private fun tasksOverlap(a: Task, b: Task): Boolean {
+        val aStart = LocalDate.parse(a.startDate)
+        val aEnd = LocalDate.parse(a.endDate)
+        val bStart = LocalDate.parse(b.startDate)
+        val bEnd = LocalDate.parse(b.endDate)
+        // 日期无交集
+        if (aEnd < bStart || bEnd < aStart) return false
+        // 有交集的日期里，时段是否重叠
+        val overlapStart = maxOf(aStart, bStart)
+        val overlapEnd = minOf(aEnd, bEnd)
+        var d = overlapStart
+        while (d <= overlapEnd) {
+            val aTime = timeOverlapOnDate(a, d)
+            val bTime = timeOverlapOnDate(b, d)
+            if (aTime != null && bTime != null && aTime.first < bTime.second && bTime.first < aTime.second) {
+                return true
+            }
+            d = d.plusDays(1)
+        }
+        return false
+    }
+
+    private fun timeOverlapOnDate(task: Task, date: LocalDate): Pair<Int, Int>? {
+        val s = task.startTime ?: return null
+        val e = task.endTime ?: task.startTime
+        return minutes(s) to minutes(e)
+    }
+
+    private fun minutes(hhmm: String): Int {
+        val (h, m) = hhmm.split(":").map { it.toInt() }
+        return h * 60 + m
+    }
+
+    /**
+     * 执行合并。
+     * @param resolutions 冲突任务的处理结果：任务 id -> KEEP_A / KEEP_B / DROP
+     */
+    suspend fun executeMerge(
+        notebookA: Long,
+        notebookB: Long,
+        newName: String,
+        resolutions: Map<Long, MergeResolution>
+    ): Long {
+        // 新建计划本并设为当前
+        db.notebookDao().clearCurrent()
+        val newId = db.notebookDao().insert(NotebookEntity(name = newName, isCurrent = true))
+        createDefaultReviewSettings(newId)
+
+        val tasksA = db.taskDao().getAllOnce(notebookA).map { it.toModel() }
+        val tasksB = db.taskDao().getAllOnce(notebookB).map { it.toModel() }
+
+        // 冲突任务只保留被选中的一方；未涉及冲突任务全部复制
+        val conflictIds = resolutions.keys
+
+        tasksA.forEach { task ->
+            val decision = resolutions[task.id]
+            val shouldCopy = when {
+                task.id !in conflictIds -> true
+                decision == MergeResolution.KEEP_A -> true
+                else -> false
+            }
+            if (shouldCopy) {
+                db.taskDao().insert(task.copy(id = 0, notebookId = newId).toEntity())
+            }
+        }
+        tasksB.forEach { task ->
+            val decision = resolutions[task.id]
+            val shouldCopy = when {
+                task.id !in conflictIds -> true
+                decision == MergeResolution.KEEP_B -> true
+                else -> false
+            }
+            if (shouldCopy) {
+                db.taskDao().insert(task.copy(id = 0, notebookId = newId).toEntity())
+            }
+        }
+        return newId
+    }
     // endregion
 
     // region Task
@@ -70,12 +179,20 @@ class PlanBookRepository @Inject constructor(
         return allTasks.flatMap { expandTask(it.toModel(), weekDays) }
     }
 
+    /** 复盘页：当日已完成任务（PRD 4.4.4） */
+    suspend fun getCompletedTasksForDate(notebookId: Long, date: String): List<Task> =
+        db.taskDao().getCompletedForDate(notebookId, date).map { it.toModel() }
+
+    /** 复盘页：DDL 在当前日期之前或临近的长期任务（PRD 4.4.4） */
+    suspend fun getLongTermTasksDueBy(notebookId: Long, deadline: String): List<Task> =
+        db.taskDao().getLongTermUntil(notebookId, deadline).map { it.toModel() }
+
     private fun expandTask(task: Task, weekDays: List<LocalDate>): List<Task> {
+        val start = LocalDate.parse(task.startDate)
+        val end = LocalDate.parse(task.endDate)
         return when (task.type) {
             TaskType.DAILY -> {
                 weekDays.filter { date ->
-                    val start = LocalDate.parse(task.startDate)
-                    val end = LocalDate.parse(task.endDate)
                     date in start..end && when (task.repeatRule) {
                         RepeatRule.EVERY_DAY -> true
                         RepeatRule.WEEKDAYS -> {
@@ -91,7 +208,15 @@ class PlanBookRepository @Inject constructor(
                     )
                 }
             }
-            else -> listOf(task)
+            // 跨天任务在周内每一天显示（PRD 4.2.1：跨天的任务跨格显示）
+            else -> {
+                weekDays.filter { it in start..end }.map { date ->
+                    task.copy(
+                        startDate = date.toString(),
+                        endDate = date.toString()
+                    )
+                }
+            }
         }
     }
     // endregion

@@ -38,6 +38,15 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE notebookId = :notebookId AND startDate <= :date AND endDate >= :date ORDER BY startTime")
     suspend fun getForDate(notebookId: Long, date: String): List<TaskEntity>
 
+    @Query("SELECT * FROM tasks WHERE notebookId = :notebookId")
+    suspend fun getAllOnce(notebookId: Long): List<TaskEntity>
+
+    @Query("SELECT * FROM tasks WHERE notebookId = :notebookId AND isCompleted = 1 AND startDate <= :date AND endDate >= :date ORDER BY completedAt")
+    suspend fun getCompletedForDate(notebookId: Long, date: String): List<TaskEntity>
+
+    @Query("SELECT * FROM tasks WHERE notebookId = :notebookId AND type = 'LONG_TERM' AND endDate <= :deadline ORDER BY endDate")
+    suspend fun getLongTermUntil(notebookId: Long, deadline: String): List<TaskEntity>
+
     @Insert
     suspend fun insert(task: TaskEntity): Long
 
