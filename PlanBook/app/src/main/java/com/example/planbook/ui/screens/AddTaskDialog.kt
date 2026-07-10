@@ -1,7 +1,6 @@
 package com.example.planbook.ui.screens
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -89,46 +88,30 @@ fun TaskEditSheet(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 // 开始日期（点击唤起 DatePicker）
-                OutlinedTextField(
+                PickerField(
                     value = startDate,
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text("开始日期") },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { showStartDatePicker = true }
+                    label = "开始日期",
+                    onClick = { showStartDatePicker = true }
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                OutlinedTextField(
+                PickerField(
                     value = endDate,
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text(if (selectedType == TaskType.LONG_TERM) "截止日期 DDL" else "结束日期") },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { showEndDatePicker = true }
+                    label = if (selectedType == TaskType.LONG_TERM) "截止日期 DDL" else "结束日期",
+                    onClick = { showEndDatePicker = true }
                 )
 
                 if (selectedType == TaskType.ONE_OFF || selectedType == TaskType.DAILY) {
                     Spacer(modifier = Modifier.height(4.dp))
-                    OutlinedTextField(
+                    PickerField(
                         value = startTime,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("开始时间（可选，留空则无时段）") },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { showStartTimePicker = true }
+                        label = "开始时间（可选，留空则无时段）",
+                        onClick = { showStartTimePicker = true }
                     )
                     Spacer(modifier = Modifier.height(4.dp))
-                    OutlinedTextField(
+                    PickerField(
                         value = endTime,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("结束时间（可选）") },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { showEndTimePicker = true }
+                        label = "结束时间（可选）",
+                        onClick = { showEndTimePicker = true }
                     )
                 }
 

@@ -1,11 +1,13 @@
 package com.example.planbook.ui.screens
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
@@ -17,6 +19,37 @@ import androidx.compose.ui.Modifier
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+
+/**
+ * 可点击的只读字段（用于日期/时间选择器入口）。
+ *
+ * 用 `enabled = false` 的 OutlinedTextField，让它彻底不参与触摸事件分发，
+ * 再用外层 Box.clickable 接管点击——避免"只读输入框内部触摸处理与外层
+ * clickable 抢事件"导致点击时灵时不灵的问题。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun PickerField(
+    value: String,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+    ) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {},
+            readOnly = true,
+            enabled = false,
+            label = { Text(label) },
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
 
 /** 解析 HH:mm 字符串 */
 internal fun parseTime(hhmm: String): Pair<Int, Int>? {
