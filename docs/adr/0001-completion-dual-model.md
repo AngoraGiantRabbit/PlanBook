@@ -3,8 +3,10 @@
 任务的完成态按「是否周期性发生」分为两类，只有一条分流规则：
 `type == DAILY → 按天记录（task_completions 表）；否则 → 整体记录（TaskEntity.isCompleted 布尔）`。
 
-ONE_OFF、FLEX、LONG_TERM 是「一件事」，勾掉即完成，跨多天的任务在每天列都显示但共享同一个完成态。
+ONE_OFF、FLEX、LONG_TERM 是「一件事」，勾掉即完成。
 DAILY 按重复规则每天发生，每天的完成态独立，过去未勾即如实显示未完成（不自动标记逾期完成）。
+
+> 注：ADR-0002 已将灵活/临时明确为单天，ONE_OFF/FLEX 不再跨多天，完成逻辑更简单——单实例任务天然只有一个完成态。
 
 ## Considered Options
 
@@ -16,3 +18,4 @@ DAILY 按重复规则每天发生，每天的完成态独立，过去未勾即�
 
 - 判断只看 `type`，不看「是否跨多天」等临时条件。`toggleTaskComplete` 和 `expandTaskWithCompletion` 各自只剩一条分流分支。
 - DB 行为变更：单天 ONE_OFF/FLEX 的完成态从 `task_completions` 回归 `isCompleted`。demo 阶段用 `fallbackToDestructiveMigration`，已有按天完成记录会丢、需重勾，可接受。
+- 长期任务的完成策略见 ADR-0003（过期自动完成），与本条的「DAILY 如实反映」是有意的不对称。
