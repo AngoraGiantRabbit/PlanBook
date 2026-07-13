@@ -266,8 +266,10 @@ class PlanBookRepository @Inject constructor(
                     task.copy(startDate = date.toString(), endDate = date.toString())
                 }
             }
-            // 灵活/临时任务恒为单天（ADR-0002）：startDate == endDate，原样返回
-            TaskType.ONE_OFF, TaskType.FLEX -> listOf(task)
+            // 灵活/临时任务恒为单天（ADR-0002）：仅当查询日命中任务日期才返回，
+            // 避免其它天的单天任务（如每日复盘）漏进本日待办列表
+            TaskType.ONE_OFF, TaskType.FLEX ->
+                if (weekDays.any { it in start..end }) listOf(task) else emptyList()
             TaskType.LONG_TERM -> listOf(task) // 不会到达，开头已 early return
         }
     }
