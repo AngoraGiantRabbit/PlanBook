@@ -193,6 +193,7 @@ class PlanBookRepository @Inject constructor(
         db.taskDao().getForDate(notebookId, date).map { it.toModel() }
 
     suspend fun getExpandedTasksForWeek(notebookId: Long, weekStart: LocalDate): List<Task> {
+        expireLongTermTasks()
         val allTasks = db.taskDao().getByNotebook(notebookId).first().map { it.toModel() }
         val weekDays = (0..6).map { weekStart.plusDays(it.toLong()) }
         // 预取本周所有完成记录，避免逐条查询
@@ -208,6 +209,7 @@ class PlanBookRepository @Inject constructor(
         // 确保复盘自动待办已生成（与课表页保持一致，问题6）
         val weekStart = date.with(java.time.DayOfWeek.MONDAY)
         ensureAutoReviewTasks(notebookId, weekStart)
+        expireLongTermTasks()
         val allTasks = db.taskDao().getByNotebook(notebookId).first().map { it.toModel() }
         val dayList = listOf(date)
         val completedIds = db.taskCompletionDao().getCompletedTaskIds(date.toString()).toSet()
@@ -217,6 +219,7 @@ class PlanBookRepository @Inject constructor(
 
     /** 复盘页：当日已完成任务（PRD 4.4.4）——含按天完成记录的 */
     suspend fun getCompletedTasksForDate(notebookId: Long, date: String): List<Task> {
+        expireLongTermTasks()
         val completedIds = db.taskCompletionDao().getCompletedTaskIds(date).toSet()
         val allTasks = db.taskDao().getByNotebook(notebookId).first().map { it.toModel() }
         val day = LocalDate.parse(date)
@@ -225,21 +228,31 @@ class PlanBookRepository @Inject constructor(
         return dayTasks.filter { it.isCompleted }
     }
 
-    /** DDL 未过的长期任务（endDate >= today），按 DDL 升序（PRD 4.4.4） */
-    suspend fun getLongTermTasksActive(notebookId: Long, today: String): List<Task> =
-        db.taskDao().getLongTermActive(notebookId, today).map { it.toModel() }
+    /** 活跃长期任务：今天落在开始日到 DDL 之间，按 DDL 升序（ADR-0002 / PRD 4.4.4） */
+    suspend fun getLongTermTasksActive(notebookId: Long, today: String): List<Task> {
+        expireLongTermTasks()
+        return db.taskDao().getLongTermActive(notebookId, today).map { it.toModel() }
+    }
+
+    /**
+     * ADR-0003：长期任务过 DDL 自动标记完成。惰性触发——在各查询入口处调用，
+     * 避免引入后台定时任务（鸿蒙/卓易通环境下不可靠且耗电）。
+     */
+    private suspend fun expireLongTermTasks() {
+        db.taskDao().expireLongTermTasks(LocalDate.now().toString(), System.currentTimeMillis())
+    }
 
     private fun expandTask(task: Task, weekDays: List<LocalDate>): List<Task> {
-        // 长期任务只有 DDL，不参与按周过滤，始终单独返回（底部长期待办栏显示）
+        // 长期任务不参与按天展开：活跃区间由 UI 按 selectedDate ∈ [startDate..DDL] 过滤，
+        // 这里始终单独返回原任务（ADR-0002）。
         if (task.type == TaskType.LONG_TERM) {
             return listOf(task)
         }
         val start = LocalDate.parse(task.startDate)
         val end = LocalDate.parse(task.endDate)
-        val isMultiDay = !start.isEqual(end)
         return when (task.type) {
             TaskType.DAILY -> {
-                // 每日任务：每天独立，copy 成单天
+                // 每日任务：按重复规则在 [start..end] 区间内逐天展开，每天独立 copy
                 weekDays.filter { date ->
                     date in start..end && when (task.repeatRule) {
                         RepeatRule.EVERY_DAY -> true
@@ -253,17 +266,8 @@ class PlanBookRepository @Inject constructor(
                     task.copy(startDate = date.toString(), endDate = date.toString())
                 }
             }
-            // 临时/灵活任务：跨天时是连贯整体，每天列显示但保留原始时间范围（不做单天 copy）
-            TaskType.ONE_OFF, TaskType.FLEX -> {
-                if (isMultiDay) {
-                    // 跨多天：在范围内的每天生成一个副本（用于渲染到对应列），
-                    // 但保留原始 startDate/endDate/startTime/endTime，完成态整体共享
-                    weekDays.filter { it in start..end }.map { task }
-                } else {
-                    // 单天：正常 copy
-                    listOf(task)
-                }
-            }
+            // 灵活/临时任务恒为单天（ADR-0002）：startDate == endDate，原样返回
+            TaskType.ONE_OFF, TaskType.FLEX -> listOf(task)
             TaskType.LONG_TERM -> listOf(task) // 不会到达，开头已 early return
         }
     }

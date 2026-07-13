@@ -200,7 +200,7 @@ class PlanBookViewModel @Inject constructor(
         }
     }
 
-    /** 点击任务：加载原始任务（避免展开后的单日 copy 覆盖跨天范围），打开编辑器 */
+    /** 点击任务：加载原始任务（避免展开后的单日 copy 覆盖原始区间），打开编辑器 */
     fun openTaskEditor(task: Task) {
         viewModelScope.launch {
             val original = repository.getTaskById(task.id)

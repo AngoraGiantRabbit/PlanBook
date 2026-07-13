@@ -249,8 +249,8 @@ fun WeekView(
                                 )
                             }
                         }
-                        // 该天有时段的任务
-                        // 该天有时段的任务：日期范围覆盖该天（支持跨天任务保留原始范围）
+                        // 该天有时段的任务：日期范围覆盖该天
+                        // DAILY 已按天展开（startDate==endDate==该天）；ONE_OFF/FLEX 单天；LONG_TERM 无 startTime 不进入
                         val dayTimedTasks = tasks.filter { task ->
                             task.startTime != null && runCatching {
                                 val ts = java.time.LocalDate.parse(task.startDate)
@@ -294,7 +294,7 @@ fun WeekView(
             }
         }
 
-        // 灵活待办区域：只显示选中那一天覆盖到的灵活任务（支持跨天范围）
+        // 灵活待办区域：选中日的灵活任务（灵活任务恒单天，ADR-0002）
         val flexTasks = tasks.filter {
             it.type == com.example.planbook.model.TaskType.FLEX && runCatching {
                 val ts = java.time.LocalDate.parse(it.startDate)
@@ -309,8 +309,14 @@ fun WeekView(
             onTaskClick = onTaskClick
         )
 
-        // 长期待办区域：DDL 未过的长期任务（独立栏，带勾选）
-        val longTermTasks = tasks.filter { it.type == com.example.planbook.model.TaskType.LONG_TERM }
+        // 长期待办区域：仅当查看日落在 [startDate..DDL] 区间内的长期任务（ADR-0002）
+        val longTermTasks = tasks.filter {
+            it.type == com.example.planbook.model.TaskType.LONG_TERM && runCatching {
+                val ts = java.time.LocalDate.parse(it.startDate)
+                val te = java.time.LocalDate.parse(it.endDate)
+                selectedDate in ts..te
+            }.getOrDefault(false)
+        }
         LongTermTaskArea(
             tasks = longTermTasks,
             onToggleComplete = onToggleComplete,

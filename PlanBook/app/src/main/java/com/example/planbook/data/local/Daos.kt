@@ -44,8 +44,15 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE notebookId = :notebookId AND isCompleted = 1 AND startDate <= :date AND endDate >= :date ORDER BY completedAt")
     suspend fun getCompletedForDate(notebookId: Long, date: String): List<TaskEntity>
 
-    @Query("SELECT * FROM tasks WHERE notebookId = :notebookId AND type = 'LONG_TERM' AND endDate >= :today ORDER BY endDate")
+    @Query("SELECT * FROM tasks WHERE notebookId = :notebookId AND type = 'LONG_TERM' AND isCompleted = 0 AND startDate <= :today AND endDate >= :today ORDER BY endDate")
     suspend fun getLongTermActive(notebookId: Long, today: String): List<TaskEntity>
+
+    /**
+     * ADR-0003：长期任务过 DDL 即视为放弃/过期，自动标记完成并从所有视图消失。
+     * 惰性触发——由 Repository 在查询入口处调用，无需后台任务。
+     */
+    @Query("UPDATE tasks SET isCompleted = 1, completedAt = :now WHERE type = 'LONG_TERM' AND isCompleted = 0 AND endDate < :today")
+    suspend fun expireLongTermTasks(today: String, now: Long)
 
     @Query("SELECT * FROM tasks WHERE id = :taskId LIMIT 1")
     suspend fun getById(taskId: Long): TaskEntity?

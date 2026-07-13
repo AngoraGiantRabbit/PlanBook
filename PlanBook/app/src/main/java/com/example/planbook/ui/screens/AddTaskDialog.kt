@@ -75,7 +75,13 @@ fun TaskEditSheet(
                     TaskType.entries.forEachIndexed { index, type ->
                         SegmentedButton(
                             selected = selectedType == type,
-                            onClick = { selectedType = type },
+                            onClick = {
+                                selectedType = type
+                                // 切到单天类型时，把 endDate 收敛到 startDate，避免脏数据（ADR-0002）
+                                if (type == TaskType.FLEX || type == TaskType.ONE_OFF) {
+                                    endDate = startDate
+                                }
+                            },
                             shape = SegmentedButtonDefaults.itemShape(
                                 index = index,
                                 count = TaskType.entries.size
@@ -87,18 +93,22 @@ fun TaskEditSheet(
                 }
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // 开始日期（点击唤起 DatePicker）
+                // 日期入口：灵活/临时单天（一个），每日/长期两个（ADR-0002）
+                val isSingleDayType =
+                    selectedType == TaskType.FLEX || selectedType == TaskType.ONE_OFF
                 PickerField(
-                    value = startDate,
-                    label = "开始日期",
+                    value = if (isSingleDayType) startDate else startDate,
+                    label = if (isSingleDayType) "日期" else "开始日期",
                     onClick = { showStartDatePicker = true }
                 )
-                Spacer(modifier = Modifier.height(4.dp))
-                PickerField(
-                    value = endDate,
-                    label = if (selectedType == TaskType.LONG_TERM) "截止日期 DDL" else "结束日期",
-                    onClick = { showEndDatePicker = true }
-                )
+                if (!isSingleDayType) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    PickerField(
+                        value = endDate,
+                        label = if (selectedType == TaskType.LONG_TERM) "截止日期 DDL" else "结束日期",
+                        onClick = { showEndDatePicker = true }
+                    )
+                }
 
                 if (selectedType == TaskType.ONE_OFF || selectedType == TaskType.DAILY) {
                     Spacer(modifier = Modifier.height(4.dp))
@@ -165,14 +175,21 @@ fun TaskEditSheet(
                 }
                 TextButton(
                     onClick = {
+                        // ADR-0002：灵活/临时为单天，强制 startDate == endDate
+                        val (finalStart, finalEnd) =
+                            if (selectedType == TaskType.FLEX || selectedType == TaskType.ONE_OFF) {
+                                startDate to startDate
+                            } else {
+                                startDate to endDate
+                            }
                         val task = Task(
                             id = existing?.id ?: 0,
                             notebookId = notebookId,
                             title = title,
                             description = description,
                             type = selectedType,
-                            startDate = startDate,
-                            endDate = endDate,
+                            startDate = finalStart,
+                            endDate = finalEnd,
                             startTime = startTime.takeIf { it.isNotBlank() },
                             endTime = endTime.takeIf { it.isNotBlank() },
                             repeatRule = if (selectedType == TaskType.DAILY) repeatRule else null,
@@ -206,6 +223,10 @@ fun TaskEditSheet(
             initial = runCatching { LocalDate.parse(startDate) }.getOrNull(),
             onConfirm = {
                 startDate = it.toString()
+                // 单天类型：startDate 改动同步 endDate（ADR-0002）
+                if (selectedType == TaskType.FLEX || selectedType == TaskType.ONE_OFF) {
+                    endDate = it.toString()
+                }
                 showStartDatePicker = false
             },
             onDismiss = { showStartDatePicker = false }
