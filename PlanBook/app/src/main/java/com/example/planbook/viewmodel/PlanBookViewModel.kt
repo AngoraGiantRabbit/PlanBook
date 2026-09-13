@@ -23,7 +23,6 @@ data class PlanBookUiState(
     val weekStart: LocalDate = LocalDate.now().with(WeekFields.of(java.util.Locale.CHINA).dayOfWeek(), 1L),
     /** 周视图底部"灵活待办"区选中的某一天（默认今天） */
     val selectedDate: LocalDate = LocalDate.now(),
-    val showNotebookSelector: Boolean = false,
     val showAddTaskDialog: Boolean = false,
     val editingTask: Task? = null,
     /** 新建任务时的预填模板（点空白时段时预填日期+时段，PRD 4.2.2） */
@@ -55,10 +54,10 @@ class PlanBookViewModel @Inject constructor(
         }
     }
 
-    /** 用当前状态里的主计划本 + 子计划本集合重新加载周视图数据 */
+    /** 用当前状态里的主计划本 + 显示中的子计划本集合重新加载周视图数据（#9：按显示开关过滤） */
     private fun reloadTasks() {
         val master = _uiState.value.currentNotebook ?: return
-        val subIds = _uiState.value.notebooks.map { it.id }
+        val subIds = _uiState.value.notebooks.filter { it.isVisible }.map { it.id }
         loadTasks(master.id, subIds, _uiState.value.weekStart)
     }
 
@@ -89,45 +88,10 @@ class PlanBookViewModel @Inject constructor(
         }
     }
 
-    /** 切换活动子计划本（顶栏弹窗选择 = 换写操作目标） */
-    fun switchNotebook(notebook: Notebook) {
+    /** 切换活动子计划本（首页 chips 点按 = 换写操作目标，#9） */
+    fun switchActiveSub(notebook: Notebook) {
         viewModelScope.launch {
             repository.setActiveSubNotebook(notebook.id)
-        }
-        _uiState.update { it.copy(showNotebookSelector = false) }
-    }
-
-    fun showNotebookSelector() {
-        _uiState.update { it.copy(showNotebookSelector = true) }
-    }
-
-    fun hideNotebookSelector() {
-        _uiState.update { it.copy(showNotebookSelector = false) }
-    }
-
-    /** 重命名子计划本（PRD 4.1.3） */
-    fun renameNotebook(notebook: Notebook, newName: String) {
-        viewModelScope.launch {
-            repository.renameNotebook(notebook.copy(name = newName))
-        }
-    }
-
-    /** 删除子计划本：至少保留一个；删活动子本时自动换活动（PRD 4.1） */
-    fun deleteNotebook(notebook: Notebook) {
-        viewModelScope.launch {
-            if (_uiState.value.notebooks.size <= 1) return@launch
-            repository.deleteNotebook(notebook)
-        }
-    }
-
-    /** 检测两个子计划本的带时段任务冲突（PRD 4.1.4） */
-    suspend fun detectMergeConflicts(a: Long, b: Long) =
-        repository.detectMergeConflicts(a, b)
-
-    /** 执行合并：产物为主计划本下的新子计划本（PRD 4.1.4） */
-    fun executeMerge(a: Long, b: Long, newName: String, resolutions: Map<Long, com.example.planbook.model.MergeResolution>) {
-        viewModelScope.launch {
-            repository.executeMerge(a, b, newName, resolutions)
         }
     }
 

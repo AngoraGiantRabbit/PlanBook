@@ -2,6 +2,7 @@ package com.example.planbook.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,6 +23,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.planbook.model.Notebook
@@ -47,15 +49,11 @@ fun PlanBookScreen(
             TopAppBar(
                 title = {
                     Column {
-                        TextButton(
-                            onClick = { viewModel.showNotebookSelector() },
-                            contentPadding = PaddingValues(horizontal = 4.dp)
-                        ) {
-                            Text(
-                                text = uiState.currentNotebook?.name ?: "选择计划本",
-                                style = MaterialTheme.typography.titleLarge
-                            )
-                        }
+                        // #9：标题固定为主计划本名（切换子计划本改走顶部 chips）
+                        Text(
+                            text = uiState.currentNotebook?.name ?: "计划本",
+                            style = MaterialTheme.typography.titleLarge
+                        )
                         val weekEnd = uiState.weekStart.plusDays(6)
                         val fmt = DateTimeFormatter.ofPattern("MM/dd")
                         Text(
@@ -92,52 +90,45 @@ fun PlanBookScreen(
             }
         }
     ) { padding ->
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
         ) {
             if (uiState.currentNotebook == null) {
-                EmptyNotebookState(onCreate = { viewModel.createNotebook("我的计划本") })
+                Box(modifier = Modifier.weight(1f)) {
+                    EmptyNotebookState(onCreate = { viewModel.createNotebook("我的计划本") })
+                }
             } else {
-                WeekView(
-                    tasks = uiState.tasks,
-                    weekStart = uiState.weekStart,
-                    selectedDate = uiState.selectedDate,
-                    onSelectDate = { viewModel.selectDate(it) },
-                    onToggleComplete = { viewModel.toggleTaskComplete(it) },
-                    onTaskClick = { task ->
-                        // 自动复盘待办点击进入复盘编辑页（PRD 4.4.1）
-                        if (task.isAutoReview) {
-                            onOpenReview(task.startDate)
-                        } else {
-                            viewModel.openTaskEditor(task)
-                        }
-                    },
-                    onCellClick = { date, hour ->
-                        viewModel.showAddTaskDialogWithPrefill(date, hour)
-                    }
+                // #9：首页子计划本 chips（显示中的子本各一枚，点按切换活动子本 = 写操作目标）
+                SubNotebookChips(
+                    subNotebooks = uiState.notebooks.filter { it.isVisible },
+                    activeSubId = uiState.activeSubNotebook?.id,
+                    onSelect = { viewModel.switchActiveSub(it) }
                 )
+                Box(modifier = Modifier.weight(1f)) {
+                    WeekView(
+                        tasks = uiState.tasks,
+                        subNotebooks = uiState.notebooks,
+                        weekStart = uiState.weekStart,
+                        selectedDate = uiState.selectedDate,
+                        onSelectDate = { viewModel.selectDate(it) },
+                        onToggleComplete = { viewModel.toggleTaskComplete(it) },
+                        onTaskClick = { task ->
+                            // 自动复盘待办点击进入复盘编辑页（PRD 4.4.1）
+                            if (task.isAutoReview) {
+                                onOpenReview(task.startDate)
+                            } else {
+                                viewModel.openTaskEditor(task)
+                            }
+                        },
+                        onCellClick = { date, hour ->
+                            viewModel.showAddTaskDialogWithPrefill(date, hour)
+                        }
+                    )
+                }
             }
         }
-    }
-
-    if (uiState.showNotebookSelector) {
-        NotebookSelectorDialog(
-            // #7：列表为子计划本，「当前」= 活动子计划本（写操作目标）；新建即新建子计划本
-            notebooks = uiState.notebooks,
-            current = uiState.activeSubNotebook,
-            onSelect = { viewModel.switchNotebook(it) },
-            onCreate = {
-                val master = uiState.currentNotebook
-                if (master != null) {
-                    viewModel.createSubNotebook("子计划本 ${uiState.notebooks.size + 1}")
-                } else {
-                    viewModel.createNotebook("我的计划本")
-                }
-            },
-            onDismiss = { viewModel.hideNotebookSelector() }
-        )
     }
 
     if (uiState.showAddTaskDialog) {
@@ -180,6 +171,7 @@ fun EmptyNotebookState(onCreate: () -> Unit) {
 @Composable
 fun WeekView(
     tasks: List<Task>,
+    subNotebooks: List<Notebook>,
     weekStart: LocalDate,
     selectedDate: LocalDate,
     onSelectDate: (LocalDate) -> Unit,
@@ -192,6 +184,15 @@ fun WeekView(
     // 用 dayOfWeek 动态生成星期名，避免硬编码错位（问题7）
     val weekdayNames = listOf("一", "二", "三", "四", "五", "六", "日")
     val today = LocalDate.now()
+    // #9：子计划本颜色表（id -> Color），解析失败回退主题色；主计划本（自动复盘待办）无条目 → 主题 tertiary
+    val subColorMap = remember(subNotebooks) {
+        subNotebooks.mapNotNull { nb ->
+            nb.color?.let { hex ->
+                runCatching { Color(android.graphics.Color.parseColor(hex)) }.getOrNull()
+                    ?.let { nb.id to it }
+            }
+        }.toMap()
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         // 表头（可点击选中某一天）
@@ -300,6 +301,7 @@ fun WeekView(
                             }
                             TaskBlock(
                                 task = task,
+                                subColor = subColorMap[task.notebookId],
                                 modifier = Modifier
                                     .offset(x = with(density) { (idx * blockWidth).dp }, y = yOffset)
                                     .width(with(density) { blockWidth.dp })
@@ -347,12 +349,15 @@ fun WeekView(
 @Composable
 fun TaskBlock(
     task: Task,
+    subColor: Color? = null,
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
-    val baseColor = when (task.reviewType) {
-        null -> MaterialTheme.colorScheme.primaryContainer
-        else -> MaterialTheme.colorScheme.tertiaryContainer
+    // #9：任务块按所属子计划本的颜色着色；主计划本（自动复盘待办）与无色子本走主题色
+    val baseColor = when {
+        subColor != null -> subColor
+        task.reviewType != null -> MaterialTheme.colorScheme.tertiaryContainer
+        else -> MaterialTheme.colorScheme.primaryContainer
     }
     // 已完成任务变透明（PRD：完成态更透明），留原位
     val alpha = if (task.isCompleted) 0.35f else 1f
@@ -362,12 +367,25 @@ fun TaskBlock(
             .background(baseColor.copy(alpha = alpha))
             .clickable(onClick = onClick)
     ) {
-        Text(
-            text = task.title,
-            style = MaterialTheme.typography.labelSmall,
-            textDecoration = if (task.isCompleted) TextDecoration.LineThrough else TextDecoration.None,
-            modifier = Modifier.padding(2.dp)
-        )
+        Column(modifier = Modifier.padding(2.dp)) {
+            Text(
+                text = task.title,
+                style = MaterialTheme.typography.labelSmall,
+                textDecoration = if (task.isCompleted) TextDecoration.LineThrough else TextDecoration.None,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            // #9：备注小字行（ICS 课程表显示「教室 · 老师」的呈现基础）
+            if (task.description.isNotBlank()) {
+                Text(
+                    text = task.description,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
     }
 }
 
@@ -496,45 +514,39 @@ fun LongTermTaskItem(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/** #9：首页子计划本 chips——显示中的子本各一枚（带颜色点），点按切换活动子本（写操作目标） */
 @Composable
-fun NotebookSelectorDialog(
-    notebooks: List<Notebook>,
-    current: Notebook?,
-    onSelect: (Notebook) -> Unit,
-    onCreate: () -> Unit,
-    onDismiss: () -> Unit
+private fun SubNotebookChips(
+    subNotebooks: List<Notebook>,
+    activeSubId: Long?,
+    onSelect: (Notebook) -> Unit
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("选择计划本") },
-        text = {
-            Column {
-                notebooks.forEach { notebook ->
-                    ListItem(
-                        headlineContent = { Text(notebook.name) },
-                        leadingContent = {
-                            RadioButton(
-                                selected = notebook.id == current?.id,
-                                onClick = { onSelect(notebook) }
-                            )
-                        },
-                        modifier = Modifier.fillMaxWidth()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 8.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        subNotebooks.forEach { sub ->
+            val dotColor = sub.color?.let {
+                runCatching { Color(android.graphics.Color.parseColor(it)) }.getOrNull()
+            } ?: MaterialTheme.colorScheme.primary
+            FilterChip(
+                selected = sub.id == activeSubId,
+                onClick = { onSelect(sub) },
+                label = { Text(sub.name) },
+                leadingIcon = {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(MaterialTheme.shapes.extraSmall)
+                            .background(dotColor)
                     )
                 }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onCreate) {
-                Text("新建")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("关闭")
-            }
+            )
         }
-    )
+    }
 }
 
 /** "HH:mm" → 当日分钟数（问题1：课表按时间精确放置任务块） */

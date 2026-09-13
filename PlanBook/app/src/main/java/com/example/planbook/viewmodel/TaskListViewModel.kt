@@ -45,7 +45,14 @@ class TaskListViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(currentNotebook = master, subNotebooks = subs, activeSubNotebook = active)
                     }
-                    master?.let { loadDayTasks(it.id, subs.map { s -> s.id }, _uiState.value.selectedDate) }
+                    // 与计划本页同口径：只聚合显示开关打开的子计划本（#9）
+                    master?.let {
+                        loadDayTasks(
+                            it.id,
+                            subs.filter { s -> s.isVisible }.map { s -> s.id },
+                            _uiState.value.selectedDate
+                        )
+                    }
                 }
         }
     }
@@ -53,7 +60,7 @@ class TaskListViewModel @Inject constructor(
     fun selectDate(date: LocalDate) {
         _uiState.update { it.copy(selectedDate = date) }
         val master = _uiState.value.currentNotebook ?: return
-        loadDayTasks(master.id, _uiState.value.subNotebooks.map { it.id }, date)
+        loadDayTasks(master.id, _uiState.value.subNotebooks.filter { it.isVisible }.map { it.id }, date)
     }
 
     private fun loadDayTasks(masterId: Long, subNotebookIds: List<Long>, date: LocalDate) {
@@ -68,7 +75,7 @@ class TaskListViewModel @Inject constructor(
         viewModelScope.launch {
             repository.toggleTaskComplete(task, _uiState.value.selectedDate.toString())
             val master = _uiState.value.currentNotebook ?: return@launch
-            loadDayTasks(master.id, _uiState.value.subNotebooks.map { it.id }, _uiState.value.selectedDate)
+            loadDayTasks(master.id, _uiState.value.subNotebooks.filter { it.isVisible }.map { it.id }, _uiState.value.selectedDate)
         }
     }
 
@@ -93,7 +100,7 @@ class TaskListViewModel @Inject constructor(
         viewModelScope.launch {
             repository.addTask(task)
             val master = _uiState.value.currentNotebook ?: return@launch
-            loadDayTasks(master.id, _uiState.value.subNotebooks.map { it.id }, _uiState.value.selectedDate)
+            loadDayTasks(master.id, _uiState.value.subNotebooks.filter { it.isVisible }.map { it.id }, _uiState.value.selectedDate)
             _uiState.update { it.copy(showAddDialog = false, prefillTask = null) }
         }
     }

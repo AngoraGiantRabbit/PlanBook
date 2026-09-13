@@ -262,6 +262,7 @@ class PlanBookRepository @Inject constructor(
         weekStart: LocalDate
     ): List<Task> {
         expireLongTermTasks()
+        ensureSubNotebookColors(masterId)
         val allTasks = db.taskDao().getByNotebookIdsOnce(subNotebookIds + masterId).map { it.toModel() }
         val weekDays = (0..6).map { weekStart.plusDays(it.toLong()) }
         // 预取本周所有完成记录，避免逐条查询
@@ -308,6 +309,18 @@ class PlanBookRepository @Inject constructor(
      */
     private suspend fun expireLongTermTasks() {
         db.taskDao().expireLongTermTasks(LocalDate.now().toString(), System.currentTimeMillis())
+    }
+
+    /**
+     * #9：旧版迁移来的子计划本没有颜色，按创建序从调色板轮转补齐（幂等，补完即空转）。
+     */
+    private suspend fun ensureSubNotebookColors(masterId: Long) {
+        val subs = db.notebookDao().getSubNotebooksOnce(masterId)
+        subs.forEachIndexed { index, sub ->
+            if (sub.color == null) {
+                db.notebookDao().update(sub.copy(color = SubNotebookPalette.forIndex(index)))
+            }
+        }
     }
 
     private fun expandTask(task: Task, weekDays: List<LocalDate>): List<Task> {
