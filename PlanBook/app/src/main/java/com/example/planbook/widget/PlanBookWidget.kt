@@ -49,6 +49,12 @@ private data class WidgetTask(
     val color: Color?
 )
 
+/** #15：今日待办条目（灵活待办 + 无时段临时任务 + 活跃长期待办，与 App 底部同口径） */
+private data class WidgetTodo(
+    val title: String,
+    val done: Boolean
+)
+
 /** 小部件取 repository 的 Hilt 入口（无 ViewModel 环境） */
 @EntryPoint
 @InstallIn(SingletonComponent::class)
@@ -118,6 +124,44 @@ class PlanBookWidget : GlanceAppWidget() {
                         )
                     }
                 }
+                // #15：底部今日待办区（只读；与 App 计划本页底部口径一致）
+                if ((data?.todos?.size ?: 0) > 0) {
+                    Column(
+                        modifier = GlanceModifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp)
+                            .background(Color(0xFFF5F1FA))
+                            .cornerRadius(8.dp)
+                            .padding(horizontal = 6.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = "今日待办",
+                            style = TextStyle(
+                                color = ColorProvider(Color(0xFF4A3B8C)),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            modifier = GlanceModifier.padding(bottom = 1.dp)
+                        )
+                        // 最多展示 4 条（未完成优先），超出提示
+                        val sorted = data!!.todos.sortedBy { it.done }
+                        sorted.take(4).forEach { todo ->
+                            Text(
+                                text = if (todo.done) "✓ ${todo.title}" else "○ ${todo.title}",
+                                style = TextStyle(
+                                    color = ColorProvider(if (todo.done) Color.Gray else Color.Black),
+                                    fontSize = 10.sp
+                                )
+                            )
+                        }
+                        if (sorted.size > 4) {
+                            Text(
+                                text = "…还有 ${sorted.size - 4} 条",
+                                style = TextStyle(color = ColorProvider(Color.Gray), fontSize = 9.sp)
+                            )
+                        }
+                    }
+                }
                 Text(
                     text = "在 App 内点刷新同步",
                     modifier = GlanceModifier.padding(top = 2.dp),
@@ -130,7 +174,9 @@ class PlanBookWidget : GlanceAppWidget() {
     private class WeekData(
         val masterName: String,
         val weekRangeText: String,
-        val days: List<WidgetDay>
+        val days: List<WidgetDay>,
+        /** #15：今日待办（与 App 计划本页底部两区同口径合并） */
+        val todos: List<WidgetTodo>
     )
 
     private suspend fun buildWeekData(repo: PlanBookRepository): WeekData? {
@@ -140,9 +186,24 @@ class PlanBookWidget : GlanceAppWidget() {
         val today = LocalDate.now()
         val weekStart = today.minusDays((today.dayOfWeek.value - 1).toLong())
         // 与计划本页同口径的聚合查询（含主计划本的自动复盘待办）
-        val tasks = repo.getExpandedTasksForWeek(
+        val allTasks = repo.getExpandedTasksForWeek(
             master.id, visibleSubs.map { it.id }, weekStart
-        ).filter { it.startTime != null }
+        )
+        val tasks = allTasks.filter { it.startTime != null }
+
+        // #15：今日待办 = 今天的灵活待办（FLEX + 无时段 ONE_OFF，PRD 4.3.1）+ 活跃长期待办，
+        // 过滤口径与 PlanBookScreen 底部两区一致（today ∈ [start..end]）
+        val todayText = today.toString()
+        val todos = allTasks.filter { t ->
+            val inRange = runCatching {
+                today in LocalDate.parse(t.startDate)..LocalDate.parse(t.endDate)
+            }.getOrDefault(false)
+            inRange && (
+                t.type == com.example.planbook.model.TaskType.FLEX ||
+                    (t.type == com.example.planbook.model.TaskType.ONE_OFF && t.startTime == null) ||
+                    t.type == com.example.planbook.model.TaskType.LONG_TERM
+                )
+        }.map { WidgetTodo(it.title, it.isCompleted) }
 
         val colorMap = visibleSubs.mapNotNull { sub ->
             sub.color?.let { hex ->
@@ -171,7 +232,7 @@ class PlanBookWidget : GlanceAppWidget() {
                 tasks = dayTasks
             )
         }
-        return WeekData(master.name, formatWeek(weekStart), days)
+        return WeekData(master.name, formatWeek(weekStart), days, todos)
     }
 
     private fun formatWeek(weekStart: LocalDate): String {
