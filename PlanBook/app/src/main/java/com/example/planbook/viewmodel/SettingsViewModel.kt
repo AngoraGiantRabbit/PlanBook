@@ -12,6 +12,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class SettingsUiState(
+    /** 主计划本（ADR-0004：复盘设置挂主计划本） */
     val currentNotebook: Notebook? = null,
     val reviewSettings: List<ReviewSetting> = emptyList()
 )
@@ -26,9 +27,9 @@ class SettingsViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            repository.getCurrentNotebook().collect { notebook ->
-                _uiState.update { it.copy(currentNotebook = notebook) }
-                notebook?.let { loadSettings(it.id) }
+            repository.getMasterNotebook().collect { master ->
+                _uiState.update { it.copy(currentNotebook = master) }
+                master?.let { loadSettings(it.id) }
             }
         }
     }
@@ -46,9 +47,9 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun toggleReview(type: ReviewType, enabled: Boolean) {
-        val setting = _uiState.value.reviewSettings.firstOrNull { it.reviewType == type } ?: return
+        val notebookId = _uiState.value.currentNotebook?.id ?: return
         viewModelScope.launch {
-            repository.saveReviewSetting(setting.copy(enabled = enabled))
+            repository.setReviewEnabled(notebookId, type, enabled)
         }
     }
 

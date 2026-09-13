@@ -4,12 +4,21 @@ import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
+/**
+ * 计划本（ADR-0004 两层模型）：
+ * - parentId 为 null → 主计划本（全局唯一，复盘/复盘设置/自动复盘待办挂它）
+ * - parentId 非 null → 子计划本（任务挂在子计划本上）
+ * 子计划本有两个独立状态：isVisible（是否在计划本页聚合显示）、isActive（活动子计划本，写操作目标，同父下唯一）。
+ */
 @Entity(tableName = "notebooks")
 data class NotebookEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
     val name: String,
-    val isCurrent: Boolean = false,
+    val parentId: Long? = null,
+    val color: String? = null,    // 子计划本颜色 "#RRGGBB"，主计划本为 null
+    val isVisible: Boolean = true,
+    val isActive: Boolean = false,
     val createdAt: Long = System.currentTimeMillis()
 )
 

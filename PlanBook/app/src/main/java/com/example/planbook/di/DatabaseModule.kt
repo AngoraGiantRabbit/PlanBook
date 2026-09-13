@@ -21,6 +21,10 @@ object DatabaseModule {
             context,
             PlanBookDatabase::class.java,
             "planbook.db"
-        ).fallbackToDestructiveMigration().build()
+        )
+            // v3→v4 主/子计划本迁移保留数据（#7）；更早版本仍走破坏性重建
+            .addMigrations(PlanBookDatabase.MIGRATION_3_4)
+            .fallbackToDestructiveMigration()
+            .build()
     }
 }

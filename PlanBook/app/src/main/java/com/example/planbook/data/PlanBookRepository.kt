@@ -4,6 +4,8 @@ import com.example.planbook.data.local.*
 import com.example.planbook.model.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import java.time.DayOfWeek
 import java.time.LocalDate
@@ -15,31 +17,81 @@ import javax.inject.Singleton
 class PlanBookRepository @Inject constructor(
     private val db: PlanBookDatabase
 ) {
-    // region Notebook
-    fun getAllNotebooks(): Flow<List<Notebook>> =
-        db.notebookDao().getAll().map { list -> list.map { it.toModel() } }
+    // region Notebook（ADR-0004：主计划本 + 子计划本）
+    /** 主计划本（全局唯一；复盘、复盘设置、自动复盘待办挂它） */
+    fun getMasterNotebook(): Flow<Notebook?> =
+        db.notebookDao().getMaster().map { it?.toModel() }
 
-    fun getCurrentNotebook(): Flow<Notebook?> =
-        db.notebookDao().getCurrent().map { it?.toModel() }
+    suspend fun getMasterNotebookOnce(): Notebook? =
+        db.notebookDao().getMasterOnce()?.toModel()
 
-    suspend fun createNotebook(name: String): Long {
-        db.notebookDao().clearCurrent()
-        val id = db.notebookDao().insert(NotebookEntity(name = name, isCurrent = true))
-        createDefaultReviewSettings(id)
-        return id
+    /** 当前主计划本下的全部子计划本（含隐藏） */
+    fun getSubNotebooksOfMaster(): Flow<List<Notebook>> =
+        db.notebookDao().getMaster().flatMapLatest { master ->
+            if (master == null) flowOf(emptyList())
+            else db.notebookDao().getSubNotebooks(master.id).map { list -> list.map { it.toModel() } }
+        }
+
+    /** 活动子计划本（写操作目标，同一时刻仅一个） */
+    fun getActiveSubOfMaster(): Flow<Notebook?> =
+        db.notebookDao().getMaster().flatMapLatest { master ->
+            if (master == null) flowOf(null)
+            else db.notebookDao().getSubNotebooks(master.id).map { list ->
+                list.firstOrNull { it.isActive }?.toModel()
+            }
+        }
+
+    /**
+     * 首次启动引导：创建主计划本（带默认复盘设置）+ 第一个子计划本（活动）。
+     * 仅在主计划本不存在时由 UI 空态触发。
+     */
+    suspend fun bootstrapNotebook(firstSubName: String): Long {
+        val masterId = db.notebookDao().insert(NotebookEntity(name = "主计划本"))
+        createDefaultReviewSettings(masterId)
+        createSubNotebook(masterId, firstSubName)
+        return masterId
     }
 
-    suspend fun switchCurrentNotebook(notebookId: Long) {
-        db.notebookDao().clearCurrent()
-        db.notebookDao().setCurrent(notebookId)
+    /** 新建子计划本：调色板按现有数量轮转分配颜色；若当前无活动子本则设为活动 */
+    suspend fun createSubNotebook(masterId: Long, name: String): Long {
+        val existing = db.notebookDao().getSubNotebooksOnce(masterId)
+        return db.notebookDao().insert(
+            NotebookEntity(
+                name = name,
+                parentId = masterId,
+                color = SubNotebookPalette.forIndex(existing.size),
+                isVisible = true,
+                isActive = existing.none { it.isActive }
+            )
+        )
     }
+
+    /** 切换活动子计划本（写操作目标） */
+    suspend fun setActiveSubNotebook(subNotebookId: Long) {
+        val sub = db.notebookDao().getById(subNotebookId) ?: return
+        val masterId = sub.parentId ?: return
+        db.notebookDao().clearActive(masterId)
+        db.notebookDao().setActive(subNotebookId)
+    }
+
+    /** 显示开关：只影响计划本页聚合显示，不动数据 */
+    suspend fun setSubNotebookVisible(subNotebookId: Long, visible: Boolean) =
+        db.notebookDao().setVisible(subNotebookId, visible)
 
     suspend fun renameNotebook(notebook: Notebook) {
         db.notebookDao().update(notebook.toEntity())
     }
 
+    /** 删除子计划本（含其任务）；若删的是活动子本，把最早的剩余子本设为活动 */
     suspend fun deleteNotebook(notebook: Notebook) {
-        db.notebookDao().delete(notebook.toEntity())
+        db.taskDao().deleteByNotebook(notebook.id)
+        db.notebookDao().deleteById(notebook.id)
+        val masterId = notebook.parentId ?: return
+        val remaining = db.notebookDao().getSubNotebooksOnce(masterId)
+        if (notebook.isActive && remaining.isNotEmpty()) {
+            db.notebookDao().clearActive(masterId)
+            db.notebookDao().setActive(remaining.first().id)
+        }
     }
 
     /**
@@ -115,10 +167,23 @@ class PlanBookRepository @Inject constructor(
         newName: String,
         resolutions: Map<Long, MergeResolution>
     ): Long {
-        // 新建计划本并设为当前
-        db.notebookDao().clearCurrent()
-        val newId = db.notebookDao().insert(NotebookEntity(name = newName, isCurrent = true))
-        createDefaultReviewSettings(newId)
+        // 合并产物作为主计划本下的新子计划本，并设为活动（ADR-0004）
+        val master = db.notebookDao().getMasterOnce()
+        val newId = db.notebookDao().insert(
+            NotebookEntity(
+                name = newName,
+                parentId = master?.id,
+                color = SubNotebookPalette.forIndex(
+                    master?.let { db.notebookDao().getSubNotebooksOnce(it.id).size } ?: 0
+                ),
+                isVisible = true,
+                isActive = master != null
+            )
+        )
+        if (master != null) {
+            db.notebookDao().clearActive(master.id)
+            db.notebookDao().setActive(newId)
+        }
 
         val tasksA = db.taskDao().getAllOnce(notebookA).map { it.toModel() }
         val tasksB = db.taskDao().getAllOnce(notebookB).map { it.toModel() }
@@ -153,9 +218,6 @@ class PlanBookRepository @Inject constructor(
     // endregion
 
     // region Task
-    fun getTasksByNotebook(notebookId: Long): Flow<List<Task>> =
-        db.taskDao().getByNotebook(notebookId).map { list -> list.map { it.toModel() } }
-
     suspend fun addTask(task: Task) = db.taskDao().insert(task.toEntity())
 
     suspend fun getTaskById(taskId: Long): Task? = db.taskDao().getById(taskId)?.toModel()
@@ -189,12 +251,18 @@ class PlanBookRepository @Inject constructor(
         }
     }
 
-    suspend fun getTasksForDate(notebookId: Long, date: String): List<Task> =
-        db.taskDao().getForDate(notebookId, date).map { it.toModel() }
-
-    suspend fun getExpandedTasksForWeek(notebookId: Long, weekStart: LocalDate): List<Task> {
+    /**
+     * 周视图聚合数据（#7，ADR-0004）：子计划本任务 + 主计划本的自动复盘待办。
+     * @param masterId 主计划本 id（复盘待办挂它）
+     * @param subNotebookIds 参与聚合的子计划本 id 列表
+     */
+    suspend fun getExpandedTasksForWeek(
+        masterId: Long,
+        subNotebookIds: List<Long>,
+        weekStart: LocalDate
+    ): List<Task> {
         expireLongTermTasks()
-        val allTasks = db.taskDao().getByNotebook(notebookId).first().map { it.toModel() }
+        val allTasks = db.taskDao().getByNotebookIdsOnce(subNotebookIds + masterId).map { it.toModel() }
         val weekDays = (0..6).map { weekStart.plusDays(it.toLong()) }
         // 预取本周所有完成记录，避免逐条查询
         val completedMap = mutableMapOf<String, MutableSet<Long>>()
@@ -205,12 +273,12 @@ class PlanBookRepository @Inject constructor(
     }
 
     /** 待办列表页：某一天该显示的所有任务（四类展开后落在该天的，加上长期任务） */
-    suspend fun getTasksForDay(notebookId: Long, date: LocalDate): List<Task> {
+    suspend fun getTasksForDay(masterId: Long, subNotebookIds: List<Long>, date: LocalDate): List<Task> {
         // 确保复盘自动待办已生成（与课表页保持一致，问题6）
         val weekStart = date.with(java.time.DayOfWeek.MONDAY)
-        ensureAutoReviewTasks(notebookId, weekStart)
+        ensureAutoReviewTasks(masterId, weekStart)
         expireLongTermTasks()
-        val allTasks = db.taskDao().getByNotebook(notebookId).first().map { it.toModel() }
+        val allTasks = db.taskDao().getByNotebookIdsOnce(subNotebookIds + masterId).map { it.toModel() }
         val dayList = listOf(date)
         val completedIds = db.taskCompletionDao().getCompletedTaskIds(date.toString()).toSet()
         val completedMap = mapOf(date.toString() to completedIds.toMutableSet())
@@ -218,10 +286,10 @@ class PlanBookRepository @Inject constructor(
     }
 
     /** 复盘页：当日已完成任务（PRD 4.4.4）——含按天完成记录的 */
-    suspend fun getCompletedTasksForDate(notebookId: Long, date: String): List<Task> {
+    suspend fun getCompletedTasksForDate(masterId: Long, subNotebookIds: List<Long>, date: String): List<Task> {
         expireLongTermTasks()
         val completedIds = db.taskCompletionDao().getCompletedTaskIds(date).toSet()
-        val allTasks = db.taskDao().getByNotebook(notebookId).first().map { it.toModel() }
+        val allTasks = db.taskDao().getByNotebookIdsOnce(subNotebookIds + masterId).map { it.toModel() }
         val day = LocalDate.parse(date)
         // 该天会显示的任务中，已完成的
         val dayTasks = allTasks.flatMap { expandTaskWithCompletion(it, listOf(day), mapOf(date to completedIds)) }
@@ -322,6 +390,20 @@ class PlanBookRepository @Inject constructor(
         db.reviewSettingDao().insert(setting.toEntity())
     }
 
+    /**
+     * #6：设置某类复盘的开关。
+     * 关闭时同步删除该类型已生成但未完成的自动复盘待办（已完成保留作历史），
+     * 使首页立即与设置一致；重新打开后由 ensureAutoReviewTasks 按查看的周重新生成。
+     */
+    suspend fun setReviewEnabled(notebookId: Long, type: ReviewType, enabled: Boolean) {
+        val setting = getReviewSettings(notebookId).first().firstOrNull { it.reviewType == type }
+            ?: return
+        saveReviewSetting(setting.copy(enabled = enabled))
+        if (!enabled) {
+            db.taskDao().deleteIncompleteAutoReviews(notebookId, type.name)
+        }
+    }
+
     private suspend fun createDefaultReviewSettings(notebookId: Long) {
         ReviewType.entries.forEach { type ->
             db.reviewSettingDao().insert(
@@ -386,8 +468,11 @@ class PlanBookRepository @Inject constructor(
 }
 
 // Mapper functions
-private fun NotebookEntity.toModel() = Notebook(id, name, isCurrent, createdAt)
-private fun Notebook.toEntity() = NotebookEntity(id, name, isCurrent, createdAt)
+private fun NotebookEntity.toModel() =
+    Notebook(id, name, parentId, color, isVisible, isActive, createdAt)
+
+private fun Notebook.toEntity() =
+    NotebookEntity(id, name, parentId, color, isVisible, isActive, createdAt)
 
 private fun TaskEntity.toModel() = Task(
     id = id,

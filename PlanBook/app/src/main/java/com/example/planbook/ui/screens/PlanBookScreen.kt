@@ -20,12 +20,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.planbook.model.Notebook
 import com.example.planbook.model.Task
 import com.example.planbook.viewmodel.PlanBookViewModel
+import com.example.planbook.widget.WidgetSync
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
@@ -36,6 +39,8 @@ fun PlanBookScreen(
     viewModel: PlanBookViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
@@ -71,7 +76,11 @@ fun PlanBookScreen(
                     IconButton(onClick = { viewModel.changeWeek(1) }) {
                         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "下一周")
                     }
-                    IconButton(onClick = { viewModel.refresh() }) {
+                    IconButton(onClick = {
+                        viewModel.refresh()
+                        // 同步刷新桌面小部件（Issue #13：手动刷新机制）
+                        scope.launch { WidgetSync.updateAll(context) }
+                    }) {
                         Icon(Icons.Default.Refresh, contentDescription = "刷新")
                     }
                 }
@@ -115,17 +124,27 @@ fun PlanBookScreen(
 
     if (uiState.showNotebookSelector) {
         NotebookSelectorDialog(
+            // #7：列表为子计划本，「当前」= 活动子计划本（写操作目标）；新建即新建子计划本
             notebooks = uiState.notebooks,
-            current = uiState.currentNotebook,
+            current = uiState.activeSubNotebook,
             onSelect = { viewModel.switchNotebook(it) },
-            onCreate = { viewModel.createNotebook("计划本 ${uiState.notebooks.size + 1}") },
+            onCreate = {
+                val master = uiState.currentNotebook
+                if (master != null) {
+                    viewModel.createSubNotebook("子计划本 ${uiState.notebooks.size + 1}")
+                } else {
+                    viewModel.createNotebook("我的计划本")
+                }
+            },
             onDismiss = { viewModel.hideNotebookSelector() }
         )
     }
 
     if (uiState.showAddTaskDialog) {
         AddTaskDialog(
-            notebookId = uiState.currentNotebook?.id ?: 0,
+            // #7：新建任务落到活动子计划本
+            notebookId = uiState.activeSubNotebook?.id
+                ?: uiState.notebooks.firstOrNull()?.id ?: 0,
             prefill = uiState.prefillTask,
             onDismiss = { viewModel.hideAddTaskDialog() },
             onConfirm = { viewModel.addTask(it) }

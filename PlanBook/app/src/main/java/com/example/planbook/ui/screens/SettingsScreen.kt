@@ -93,18 +93,17 @@ private fun ReviewSettingItem(
             Text(typeLabel, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
             Switch(checked = enabled, onCheckedChange = onToggle)
         }
-        if (enabled) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("时段", style = MaterialTheme.typography.bodyMedium)
-                Spacer(modifier = Modifier.width(12.dp))
-                TimeChip(startTime) { showStartPicker = true }
-                Text(" ~ ")
-                TimeChip(endTime) { showEndPicker = true }
-            }
+        // #6：时段行始终显示（关闭开关时也能查看/修改时间，重开时不用重设）
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("时段", style = MaterialTheme.typography.bodyMedium)
+            Spacer(modifier = Modifier.width(12.dp))
+            TimeChip(startTime) { showStartPicker = true }
+            Text(" ~ ")
+            TimeChip(endTime) { showEndPicker = true }
         }
     }
 

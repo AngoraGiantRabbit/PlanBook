@@ -15,9 +15,30 @@ enum class RepeatRule {
 data class Notebook(
     val id: Long = 0,
     val name: String,
-    val isCurrent: Boolean = false,
+    val parentId: Long? = null,  // null = 主计划本
+    val color: String? = null,   // 子计划本颜色 "#RRGGBB"
+    val isVisible: Boolean = true,
+    val isActive: Boolean = false,
     val createdAt: Long = System.currentTimeMillis()
-)
+) {
+    val isMaster: Boolean get() = parentId == null
+}
+
+/** 子计划本调色板：新建时按子计划本序号轮转分配，设置页可手选覆盖（ADR-0004） */
+object SubNotebookPalette {
+    private val colors = listOf(
+        "#7986CB", // 蓝
+        "#81C784", // 绿
+        "#FFB74D", // 橙
+        "#E57373", // 红
+        "#BA68C8", // 紫
+        "#4DD0E1", // 青
+        "#A1887F", // 棕
+        "#90A4AE"  // 灰蓝
+    )
+
+    fun forIndex(index: Int): String = colors[((index % colors.size) + colors.size) % colors.size]
+}
 
 data class Task(
     val id: Long = 0,

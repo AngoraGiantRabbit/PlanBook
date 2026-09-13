@@ -58,7 +58,8 @@ fun NotebookManagerScreen(
                 items(uiState.notebooks, key = { it.id }) { notebook ->
                     NotebookManagerRow(
                         notebook = notebook,
-                        isCurrent = notebook.id == uiState.currentNotebook?.id,
+                        // #7：列表为子计划本，「当前」= 活动子计划本（写操作目标）
+                        isCurrent = notebook.id == uiState.activeSubNotebook?.id,
                         canDelete = uiState.notebooks.size > 1,
                         onRename = { renaming = notebook },
                         onDelete = { viewModel.deleteNotebook(notebook) },

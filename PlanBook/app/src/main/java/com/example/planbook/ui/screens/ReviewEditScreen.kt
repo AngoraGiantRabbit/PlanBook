@@ -37,7 +37,8 @@ fun ReviewEditScreen(
 ) {
     val state by viewModel.editState.collectAsState()
     val calState by viewModel.calendarState.collectAsState()
-    val notebookId = calState.currentNotebook?.id ?: 0L
+    // 拆分长期任务时，子任务落到活动子计划本（ADR-0004）
+    val notebookId = calState.activeSubNotebook?.id ?: calState.currentNotebook?.id ?: 0L
 
     LaunchedEffect(date) {
         viewModel.openReviewEdit(date)

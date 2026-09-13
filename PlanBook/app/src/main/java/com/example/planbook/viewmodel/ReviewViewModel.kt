@@ -15,7 +15,12 @@ import javax.inject.Inject
 
 /** 复盘 Tab：月历与有内容日期 */
 data class ReviewCalendarUiState(
+    /** 主计划本（ADR-0004：复盘挂主计划本） */
     val currentNotebook: Notebook? = null,
+    /** 全部子计划本（当日任务查询用） */
+    val subNotebooks: List<Notebook> = emptyList(),
+    /** 活动子计划本（复盘页拆分长期任务时，子任务落到它） */
+    val activeSubNotebook: Notebook? = null,
     val reviewDates: Set<String> = emptySet(),  // 有复盘内容的日期 yyyy-MM-dd
     val month: LocalDate = LocalDate.now().withDayOfMonth(1)
 )
@@ -41,12 +46,19 @@ class ReviewViewModel @Inject constructor(
     val editState: StateFlow<ReviewEditUiState> = _editState.asStateFlow()
 
     init {
-        // 跟踪当前计划本 + 该计划本所有复盘日期
+        // 跟踪主计划本 + 子计划本 + 活动子本（ADR-0004）；复盘日期挂主计划本
         viewModelScope.launch {
-            repository.getCurrentNotebook().collect { notebook ->
-                _calendarState.update { it.copy(currentNotebook = notebook) }
-                notebook?.let { loadReviewDates(it.id) }
-            }
+            combine(
+                repository.getMasterNotebook(),
+                repository.getSubNotebooksOfMaster(),
+                repository.getActiveSubOfMaster()
+            ) { master, subs, active -> Triple(master, subs, active) }
+                .collect { (master, subs, active) ->
+                    _calendarState.update {
+                        it.copy(currentNotebook = master, subNotebooks = subs, activeSubNotebook = active)
+                    }
+                    master?.let { loadReviewDates(it.id) }
+                }
         }
     }
 
@@ -67,10 +79,11 @@ class ReviewViewModel @Inject constructor(
     /** 打开某日的复盘编辑页：加载内容 + 当日已完成任务 + 待细化长期任务（PRD 4.4.4） */
     fun openReviewEdit(date: String) {
         val notebook = _calendarState.value.currentNotebook ?: return
+        val subIds = _calendarState.value.subNotebooks.map { it.id }
         _editState.update { it.copy(date = date, loaded = false) }
         viewModelScope.launch {
             val review = repository.getReview(notebook.id, date)
-            val completed = repository.getCompletedTasksForDate(notebook.id, date)
+            val completed = repository.getCompletedTasksForDate(notebook.id, subIds, date)
             // DDL 未过的长期任务（PRD 4.4.4：待细化）
             val longTerm = repository.getLongTermTasksActive(notebook.id, date)
             _editState.update {
@@ -96,11 +109,12 @@ class ReviewViewModel @Inject constructor(
         }
     }
 
-    /** 长期任务拆分：用拆分出的子任务（用户已编辑好的）新建一条，原长期保留（PRD 4.4.4） */
+    /** 长期任务拆分：用拆分出的子任务（用户已编辑好的）新建一条，落到活动子计划本，原长期保留（PRD 4.4.4） */
     fun splitLongTermTask(subTask: Task) {
-        val notebook = _calendarState.value.currentNotebook ?: return
+        val master = _calendarState.value.currentNotebook ?: return
+        val activeSubId = _calendarState.value.activeSubNotebook?.id ?: master.id
         viewModelScope.launch {
-            repository.addTask(subTask.copy(id = 0, notebookId = notebook.id))
+            repository.addTask(subTask.copy(id = 0, notebookId = activeSubId))
             // 刷新编辑页，长期任务列表可能变化
             openReviewEdit(_editState.value.date)
         }

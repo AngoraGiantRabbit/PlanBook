@@ -5,14 +5,22 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface NotebookDao {
-    @Query("SELECT * FROM notebooks ORDER BY createdAt")
-    fun getAll(): Flow<List<NotebookEntity>>
+    /** 主计划本（parentId 为 null，全局唯一） */
+    @Query("SELECT * FROM notebooks WHERE parentId IS NULL LIMIT 1")
+    fun getMaster(): Flow<NotebookEntity?>
 
-    @Query("SELECT * FROM notebooks WHERE isCurrent = 1 LIMIT 1")
-    fun getCurrent(): Flow<NotebookEntity?>
+    @Query("SELECT * FROM notebooks WHERE parentId IS NULL LIMIT 1")
+    suspend fun getMasterOnce(): NotebookEntity?
 
-    @Query("SELECT * FROM notebooks WHERE isCurrent = 1 LIMIT 1")
-    suspend fun getCurrentOnce(): NotebookEntity?
+    /** 某主计划本下的全部子计划本（含隐藏的），按创建序 */
+    @Query("SELECT * FROM notebooks WHERE parentId = :masterId ORDER BY createdAt")
+    fun getSubNotebooks(masterId: Long): Flow<List<NotebookEntity>>
+
+    @Query("SELECT * FROM notebooks WHERE parentId = :masterId ORDER BY createdAt")
+    suspend fun getSubNotebooksOnce(masterId: Long): List<NotebookEntity>
+
+    @Query("SELECT * FROM notebooks WHERE id = :notebookId LIMIT 1")
+    suspend fun getById(notebookId: Long): NotebookEntity?
 
     @Insert
     suspend fun insert(notebook: NotebookEntity): Long
@@ -20,14 +28,17 @@ interface NotebookDao {
     @Update
     suspend fun update(notebook: NotebookEntity)
 
-    @Query("UPDATE notebooks SET isCurrent = 0")
-    suspend fun clearCurrent()
+    @Query("UPDATE notebooks SET isActive = 0 WHERE parentId = :masterId")
+    suspend fun clearActive(masterId: Long)
 
-    @Query("UPDATE notebooks SET isCurrent = 1 WHERE id = :notebookId")
-    suspend fun setCurrent(notebookId: Long)
+    @Query("UPDATE notebooks SET isActive = 1 WHERE id = :subNotebookId")
+    suspend fun setActive(subNotebookId: Long)
 
-    @Delete
-    suspend fun delete(notebook: NotebookEntity)
+    @Query("UPDATE notebooks SET isVisible = :visible WHERE id = :subNotebookId")
+    suspend fun setVisible(subNotebookId: Long, visible: Boolean)
+
+    @Query("DELETE FROM notebooks WHERE id = :notebookId")
+    suspend fun deleteById(notebookId: Long)
 }
 
 @Dao
@@ -40,6 +51,14 @@ interface TaskDao {
 
     @Query("SELECT * FROM tasks WHERE notebookId = :notebookId")
     suspend fun getAllOnce(notebookId: Long): List<TaskEntity>
+
+    /** #7：多个子计划本（含主计划本 id，用于带上自动复盘待办）的任务合并查询 */
+    @Query("SELECT * FROM tasks WHERE notebookId IN (:notebookIds) ORDER BY startDate, startTime")
+    suspend fun getByNotebookIdsOnce(notebookIds: List<Long>): List<TaskEntity>
+
+    /** #7：删除子计划本时一并删除其任务 */
+    @Query("DELETE FROM tasks WHERE notebookId = :notebookId")
+    suspend fun deleteByNotebook(notebookId: Long)
 
     @Query("SELECT * FROM tasks WHERE notebookId = :notebookId AND isCompleted = 1 AND startDate <= :date AND endDate >= :date ORDER BY completedAt")
     suspend fun getCompletedForDate(notebookId: Long, date: String): List<TaskEntity>
@@ -67,6 +86,10 @@ interface TaskDao {
 
     @Query("DELETE FROM tasks WHERE id = :taskId")
     suspend fun deleteById(taskId: Long)
+
+    /** #6：关闭某类复盘开关时，删除该类型已生成但未完成的自动待办（已完成保留作历史） */
+    @Query("DELETE FROM tasks WHERE notebookId = :notebookId AND isAutoReview = 1 AND reviewType = :reviewType AND isCompleted = 0")
+    suspend fun deleteIncompleteAutoReviews(notebookId: Long, reviewType: String)
 
     @Insert
     suspend fun insert(task: TaskEntity): Long
