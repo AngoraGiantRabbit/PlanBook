@@ -17,7 +17,9 @@ data class NotebookManagerUiState(
     /** 主计划本下的全部子计划本（含隐藏） */
     val subs: List<Notebook> = emptyList(),
     /** 活动子计划本 id（写操作目标） */
-    val activeSubId: Long? = null
+    val activeSubId: Long? = null,
+    /** #11：导入结果提示（成功/失败文案），null = 无待提示 */
+    val importMessage: String? = null
 )
 
 @HiltViewModel
@@ -98,5 +100,34 @@ class NotebookManagerViewModel @Inject constructor(
         viewModelScope.launch {
             repository.renameNotebook(notebook.copy(color = color))
         }
+    }
+
+    /**
+     * #11：导入 ICS——解析 + 建导入子计划本（只读快照，默认显示、不抢活动）。
+     * 失败（解析异常/无事件/读库失败）只更新提示文案，不产生半成品数据（事务回滚）。
+     */
+    fun importIcs(sourceName: String, content: String) {
+        viewModelScope.launch {
+            val message = try {
+                val tasks = com.example.planbook.data.ics.IcsParser.parse(content)
+                if (tasks.isEmpty()) {
+                    "「$sourceName」里没有解析到任何课程事件"
+                } else {
+                    val master = repository.getMasterNotebookOnce()
+                        ?: error("主计划本不存在")
+                    repository.importIcsSubNotebook(master.id, sourceName, tasks)
+                    "已导入「$sourceName」：${tasks.size} 条课程"
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("NotebookManager", "ICS 导入失败", e)
+                "导入失败：${e.message ?: "无法解析该文件"}"
+            }
+            _uiState.update { it.copy(importMessage = message) }
+        }
+    }
+
+    /** 清除导入结果提示 */
+    fun clearImportMessage() {
+        _uiState.update { it.copy(importMessage = null) }
     }
 }

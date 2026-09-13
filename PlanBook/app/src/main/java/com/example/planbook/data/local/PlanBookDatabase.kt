@@ -13,7 +13,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ReviewSettingEntity::class,
         TaskCompletionEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class PlanBookDatabase : RoomDatabase() {
@@ -76,6 +76,16 @@ abstract class PlanBookDatabase : RoomDatabase() {
                 db.execSQL("UPDATE `notebooks_new` SET `createdAt`=$now WHERE `createdAt`=-1")
                 db.execSQL("DROP TABLE `notebooks`")
                 db.execSQL("ALTER TABLE `notebooks_new` RENAME TO `notebooks`")
+            }
+        }
+
+        /**
+         * v4 → v5（#11，ADR-0005）：notebooks 增加 importSource 列标记导入子计划本。
+         * 可空列，无需 DEFAULT，存量行为 null（手建）。
+         */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `notebooks` ADD COLUMN `importSource` TEXT")
             }
         }
     }

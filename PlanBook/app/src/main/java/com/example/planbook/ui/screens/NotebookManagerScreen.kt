@@ -1,5 +1,9 @@
 package com.example.planbook.ui.screens
 
+import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -39,11 +44,28 @@ fun NotebookManagerScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val canDelete = uiState.subs.size > 1
+    val context = LocalContext.current
 
     var showCreateDialog by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<Notebook?>(null) }
     var deleting by remember { mutableStateOf<Notebook?>(null) }
     var coloring by remember { mutableStateOf<Notebook?>(null) }
+
+    // #11：SAF 选 .ics 文件 → 读取文本 → 建导入子计划本
+    val icsPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val name = queryDisplayName(context, uri) ?: "导入课程表"
+        val content = runCatching {
+            context.contentResolver.openInputStream(uri)?.bufferedReader()?.readText()
+        }.getOrNull()
+        if (content == null) {
+            viewModel.importIcs(name, "") // 空内容 → 走「没有解析到事件」提示
+        } else {
+            viewModel.importIcs(name.removeSuffix(".ics"), content)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -85,13 +107,26 @@ fun NotebookManagerScreen(
                     HorizontalDivider()
                 }
             }
-            Button(
-                onClick = { showCreateDialog = true },
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp)
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text("新建子计划本")
+                Button(
+                    onClick = { showCreateDialog = true },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("新建子计划本")
+                }
+                OutlinedButton(
+                    onClick = {
+                        icsPicker.launch(arrayOf("text/calendar", "application/octet-stream", "text/plain"))
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("导入 ICS")
+                }
             }
         }
     }
@@ -155,7 +190,28 @@ fun NotebookManagerScreen(
             onDismiss = { coloring = null }
         )
     }
+
+    // #11：导入结果提示
+    uiState.importMessage?.let { msg ->
+        AlertDialog(
+            onDismissRequest = { viewModel.clearImportMessage() },
+            title = { Text("导入 ICS") },
+            text = { Text(msg) },
+            confirmButton = {
+                TextButton(onClick = { viewModel.clearImportMessage() }) { Text("知道了") }
+            }
+        )
+    }
 }
+
+/** #11：取 SAF uri 的显示名（去扩展名由调用方处理），查不到回退 null */
+private fun queryDisplayName(context: android.content.Context, uri: Uri): String? =
+    runCatching {
+        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
+        }
+    }.getOrNull()
 
 /** 默认名：子计划本 N（N 取未被占用的最小序号，避免与现存重名） */
 private fun defaultSubName(subs: List<Notebook>): String {
@@ -204,6 +260,21 @@ private fun SubNotebookRow(
                     fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
                     style = MaterialTheme.typography.bodyLarge
                 )
+                if (notebook.isImported) {
+                    // #11：导入子计划本标识（只读快照，ADR-0005；编辑保护见 #12）
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = MaterialTheme.colorScheme.tertiaryContainer
+                    ) {
+                        Text(
+                            "导入",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                        )
+                    }
+                }
                 if (isActive) {
                     Spacer(modifier = Modifier.width(6.dp))
                     Surface(

@@ -19,6 +19,8 @@ data class NotebookEntity(
     val color: String? = null,    // 子计划本颜色 "#RRGGBB"，主计划本为 null
     val isVisible: Boolean = true,
     val isActive: Boolean = false,
+    /** 非 null = 导入子计划本（只读快照，ADR-0005）；存源文件名，重导匹配用（#12） */
+    val importSource: String? = null,
     val createdAt: Long = System.currentTimeMillis()
 )
 

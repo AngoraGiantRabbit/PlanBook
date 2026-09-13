@@ -315,13 +315,16 @@ fun WeekView(
             }
         }
 
-        // 灵活待办区域：选中日的灵活任务（灵活任务恒单天，ADR-0002）
+        // 灵活待办区域：选中日的灵活任务 + 无时段临时任务（PRD 4.3.1：无时段→底部灵活区域；
+        // ICS 全天事件即此类，#11）；两者恒单天（ADR-0002）
         val flexTasks = tasks.filter {
-            it.type == com.example.planbook.model.TaskType.FLEX && runCatching {
-                val ts = java.time.LocalDate.parse(it.startDate)
-                val te = java.time.LocalDate.parse(it.endDate)
-                selectedDate in ts..te
-            }.getOrDefault(false)
+            (it.type == com.example.planbook.model.TaskType.FLEX ||
+                (it.type == com.example.planbook.model.TaskType.ONE_OFF && it.startTime == null)) &&
+                runCatching {
+                    val ts = java.time.LocalDate.parse(it.startDate)
+                    val te = java.time.LocalDate.parse(it.endDate)
+                    selectedDate in ts..te
+                }.getOrDefault(false)
         }
         FlexibleTaskArea(
             title = "灵活待办 (${selectedDate.format(formatter)})",

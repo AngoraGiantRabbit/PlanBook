@@ -19,9 +19,12 @@ data class Notebook(
     val color: String? = null,   // 子计划本颜色 "#RRGGBB"
     val isVisible: Boolean = true,
     val isActive: Boolean = false,
+    /** 非 null = 导入子计划本（只读快照，ADR-0005）；存源文件名 */
+    val importSource: String? = null,
     val createdAt: Long = System.currentTimeMillis()
 ) {
     val isMaster: Boolean get() = parentId == null
+    val isImported: Boolean get() = importSource != null
 }
 
 /** 子计划本调色板：新建时按子计划本序号轮转分配，设置页可手选覆盖（ADR-0004） */

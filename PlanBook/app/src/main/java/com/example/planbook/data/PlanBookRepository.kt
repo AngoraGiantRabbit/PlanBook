@@ -2,6 +2,7 @@ package com.example.planbook.data
 
 import com.example.planbook.data.local.*
 import com.example.planbook.model.*
+import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
@@ -64,6 +65,44 @@ class PlanBookRepository @Inject constructor(
                 isActive = existing.none { it.isActive }
             )
         )
+    }
+
+    /**
+     * #11（ADR-0005）：ICS 导入建本——生成导入子计划本（只读快照标记 importSource），
+     * 任务为解析展开出的单天临时任务（教室 · 老师进备注）。
+     * 默认打开显示开关、不抢占活动状态。整体在一个事务里：失败回滚，不产生半成品。
+     */
+    suspend fun importIcsSubNotebook(
+        masterId: Long,
+        sourceName: String,
+        icsTasks: List<com.example.planbook.data.ics.IcsTask>
+    ): Long = db.withTransaction {
+        val existing = db.notebookDao().getSubNotebooksOnce(masterId)
+        val subId = db.notebookDao().insert(
+            NotebookEntity(
+                name = sourceName,
+                parentId = masterId,
+                color = SubNotebookPalette.forIndex(existing.size),
+                isVisible = true,
+                isActive = false,
+                importSource = sourceName
+            )
+        )
+        icsTasks.forEach { t ->
+            db.taskDao().insert(
+                TaskEntity(
+                    notebookId = subId,
+                    title = t.title,
+                    description = t.description,
+                    type = TaskType.ONE_OFF.name,
+                    startDate = t.date.toString(),
+                    endDate = t.date.toString(),
+                    startTime = t.startTime,
+                    endTime = t.endTime
+                )
+            )
+        }
+        subId
     }
 
     /** 切换活动子计划本（写操作目标） */
@@ -482,10 +521,10 @@ class PlanBookRepository @Inject constructor(
 
 // Mapper functions
 private fun NotebookEntity.toModel() =
-    Notebook(id, name, parentId, color, isVisible, isActive, createdAt)
+    Notebook(id, name, parentId, color, isVisible, isActive, importSource, createdAt)
 
 private fun Notebook.toEntity() =
-    NotebookEntity(id, name, parentId, color, isVisible, isActive, createdAt)
+    NotebookEntity(id, name, parentId, color, isVisible, isActive, importSource, createdAt)
 
 private fun TaskEntity.toModel() = Task(
     id = id,
