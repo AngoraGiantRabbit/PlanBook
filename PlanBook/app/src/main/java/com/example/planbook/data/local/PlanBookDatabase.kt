@@ -54,6 +54,20 @@ abstract class PlanBookDatabase : RoomDatabase() {
                     "INSERT INTO `notebooks_new` (`name`,`parentId`,`color`,`isVisible`,`isActive`,`createdAt`) " +
                         "VALUES ('主计划本',NULL,NULL,1,0,-1)"
                 )
+                // 多计划本 → 主计划本会折叠归属，先按主键去重，避免撞唯一索引/产生重复：
+                // - review_settings（唯一索引 notebookId+reviewType）：每个 reviewType 保留最早一条
+                // - reviews（无唯一索引）：同一日期保留 updatedAt 最新（并列取 id 最小）的一条
+                db.execSQL(
+                    "DELETE FROM `review_settings` WHERE `id` NOT IN " +
+                        "(SELECT MIN(`id`) FROM `review_settings` GROUP BY `reviewType`)"
+                )
+                db.execSQL(
+                    "DELETE FROM `reviews` WHERE `id` NOT IN (" +
+                        "SELECT `r`.`id` FROM `reviews` `r` WHERE NOT EXISTS (" +
+                        "SELECT 1 FROM `reviews` `w` WHERE `w`.`date` = `r`.`date` " +
+                        "AND (`w`.`updatedAt` > `r`.`updatedAt` " +
+                        "OR (`w`.`updatedAt` = `r`.`updatedAt` AND `w`.`id` < `r`.`id`))))"
+                )
                 db.execSQL("UPDATE `tasks` SET `notebookId`=(SELECT `id` FROM `notebooks_new` WHERE `createdAt`=-1) WHERE `isAutoReview`=1")
                 db.execSQL("UPDATE `reviews` SET `notebookId`=(SELECT `id` FROM `notebooks_new` WHERE `createdAt`=-1)")
                 db.execSQL("UPDATE `review_settings` SET `notebookId`=(SELECT `id` FROM `notebooks_new` WHERE `createdAt`=-1)")
