@@ -148,7 +148,8 @@ fun PlanBookScreen(
             existing = task,
             onDismiss = { viewModel.closeTaskEditor() },
             onConfirm = { viewModel.saveEditedTask(it) },
-            onDelete = { viewModel.deleteTask(task) }
+            onDelete = { viewModel.deleteTask(task) },
+            readOnly = uiState.editingTaskReadOnly
         )
     }
 }

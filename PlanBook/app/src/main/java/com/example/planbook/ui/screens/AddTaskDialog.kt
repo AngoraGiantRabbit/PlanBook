@@ -15,6 +15,8 @@ import java.time.LocalDate
 /**
  * 复用的任务编辑表单：新建与编辑共用（PRD 4.3.3）。
  * 新建时 [existing] 传 null；编辑时传入待编辑任务。
+ * [readOnly] = true 时为只读呈现（#12：导入子计划本是只读快照，
+ * 不可编辑保存/删除；勾选完成不受此限制），仅保留关闭按钮。
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -23,7 +25,8 @@ fun TaskEditSheet(
     existing: Task? = null,
     onDismiss: () -> Unit,
     onConfirm: (Task) -> Unit,
-    onDelete: (() -> Unit)? = null
+    onDelete: (() -> Unit)? = null,
+    readOnly: Boolean = false
 ) {
     val isNew = existing == null
     var title by remember { mutableStateOf(existing?.title ?: "") }
@@ -48,17 +51,27 @@ fun TaskEditSheet(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (isNew) "添加任务" else "编辑任务") },
+        title = { Text(when { readOnly -> "任务详情（只读）"; isNew -> "添加任务"; else -> "编辑任务" }) },
         text = {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
             ) {
+                if (readOnly) {
+                    // #12：导入子计划本为只读快照，防止 App 内改动后与源文件失去对应
+                    Text(
+                        "该任务来自导入子计划本（只读快照），不支持编辑或删除。课表有变请重新导入。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
                     label = { Text("任务名称") },
+                    enabled = !readOnly,
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(8.dp))
@@ -67,6 +80,7 @@ fun TaskEditSheet(
                     value = description,
                     onValueChange = { description = it },
                     label = { Text("备注（可选）") },
+                    enabled = !readOnly,
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(8.dp))
@@ -75,6 +89,7 @@ fun TaskEditSheet(
                     TaskType.entries.forEachIndexed { index, type ->
                         SegmentedButton(
                             selected = selectedType == type,
+                            enabled = !readOnly,
                             onClick = {
                                 selectedType = type
                                 // 切到单天类型时，把 endDate 收敛到 startDate，避免脏数据（ADR-0002）
@@ -99,14 +114,16 @@ fun TaskEditSheet(
                 PickerField(
                     value = if (isSingleDayType) startDate else startDate,
                     label = if (isSingleDayType) "日期" else "开始日期",
-                    onClick = { showStartDatePicker = true }
+                    onClick = { showStartDatePicker = true },
+                    enabled = !readOnly
                 )
                 if (!isSingleDayType) {
                     Spacer(modifier = Modifier.height(4.dp))
                     PickerField(
                         value = endDate,
                         label = if (selectedType == TaskType.LONG_TERM) "截止日期 DDL" else "结束日期",
-                        onClick = { showEndDatePicker = true }
+                        onClick = { showEndDatePicker = true },
+                        enabled = !readOnly
                     )
                 }
 
@@ -115,13 +132,15 @@ fun TaskEditSheet(
                     PickerField(
                         value = startTime,
                         label = "开始时间（可选，留空则无时段）",
-                        onClick = { showStartTimePicker = true }
+                        onClick = { showStartTimePicker = true },
+                        enabled = !readOnly
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     PickerField(
                         value = endTime,
                         label = "结束时间（可选）",
-                        onClick = { showEndTimePicker = true }
+                        onClick = { showEndTimePicker = true },
+                        enabled = !readOnly
                     )
                 }
 
@@ -132,6 +151,7 @@ fun TaskEditSheet(
                         RepeatRule.entries.forEach { rule ->
                             FilterChip(
                                 selected = repeatRule == rule,
+                                enabled = !readOnly,
                                 onClick = { repeatRule = rule },
                                 label = { Text(repeatRuleLabel(rule)) }
                             )
@@ -148,6 +168,7 @@ fun TaskEditSheet(
                             (1..7).forEach { day ->
                                 FilterChip(
                                     selected = day in selectedDays,
+                                    enabled = !readOnly,
                                     onClick = {
                                         selectedDays = if (day in selectedDays) {
                                             selectedDays - day
@@ -164,32 +185,36 @@ fun TaskEditSheet(
             }
         },
         confirmButton = {
-            Row {
-                if (!isNew && onDelete != null) {
-                    TextButton(
-                        onClick = onDelete,
-                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                    ) {
-                        Text("删除")
+            if (readOnly) {
+                // #12：只读快照——无保存/删除入口
+                TextButton(onClick = onDismiss) { Text("关闭") }
+            } else {
+                Row {
+                    if (!isNew && onDelete != null) {
+                        TextButton(
+                            onClick = onDelete,
+                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                        ) {
+                            Text("删除")
+                        }
                     }
-                }
-                TextButton(
-                    onClick = {
-                        // ADR-0002：灵活/临时为单天，强制 startDate == endDate
-                        val (finalStart, finalEnd) =
-                            if (selectedType == TaskType.FLEX || selectedType == TaskType.ONE_OFF) {
-                                startDate to startDate
-                            } else {
-                                startDate to endDate
-                            }
-                        val task = Task(
-                            id = existing?.id ?: 0,
-                            notebookId = notebookId,
-                            title = title,
-                            description = description,
-                            type = selectedType,
-                            startDate = finalStart,
-                            endDate = finalEnd,
+                    TextButton(
+                        onClick = {
+                            // ADR-0002：灵活/临时为单天，强制 startDate == endDate
+                            val (finalStart, finalEnd) =
+                                if (selectedType == TaskType.FLEX || selectedType == TaskType.ONE_OFF) {
+                                    startDate to startDate
+                                } else {
+                                    startDate to endDate
+                                }
+                            val task = Task(
+                                id = existing?.id ?: 0,
+                                notebookId = notebookId,
+                                title = title,
+                                description = description,
+                                type = selectedType,
+                                startDate = finalStart,
+                                endDate = finalEnd,
                             startTime = startTime.takeIf { it.isNotBlank() },
                             endTime = endTime.takeIf { it.isNotBlank() },
                             repeatRule = if (selectedType == TaskType.DAILY) repeatRule else null,
@@ -208,11 +233,14 @@ fun TaskEditSheet(
                 ) {
                     Text(if (isNew) "确定" else "保存")
                 }
+                }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("取消")
+            if (!readOnly) {
+                TextButton(onClick = onDismiss) {
+                    Text("取消")
+                }
             }
         }
     )

@@ -103,8 +103,8 @@ class NotebookManagerViewModel @Inject constructor(
     }
 
     /**
-     * #11：导入 ICS——解析 + 建导入子计划本（只读快照，默认显示、不抢活动）。
-     * 失败（解析异常/无事件/读库失败）只更新提示文案，不产生半成品数据（事务回滚）。
+     * #11/#12：导入 ICS——解析 + 建导入子计划本（只读快照，默认显示、不抢活动）。
+     * 同名旧导入子本整本替换重建（完成态丢弃）。失败只更新提示文案，事务回滚无半成品。
      */
     fun importIcs(sourceName: String, content: String) {
         viewModelScope.launch {
@@ -115,8 +115,12 @@ class NotebookManagerViewModel @Inject constructor(
                 } else {
                     val master = repository.getMasterNotebookOnce()
                         ?: error("主计划本不存在")
-                    repository.importIcsSubNotebook(master.id, sourceName, tasks)
-                    "已导入「$sourceName」：${tasks.size} 条课程"
+                    val result = repository.importIcsSubNotebook(master.id, sourceName, tasks)
+                    if (result.replacedOld) {
+                        "已重新导入「$sourceName」：整本替换为 ${tasks.size} 条课程（旧完成态已丢弃）"
+                    } else {
+                        "已导入「$sourceName」：${tasks.size} 条课程"
+                    }
                 }
             } catch (e: Exception) {
                 android.util.Log.e("NotebookManager", "ICS 导入失败", e)

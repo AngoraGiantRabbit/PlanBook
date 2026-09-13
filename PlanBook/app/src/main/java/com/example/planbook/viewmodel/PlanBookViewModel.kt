@@ -25,6 +25,8 @@ data class PlanBookUiState(
     val selectedDate: LocalDate = LocalDate.now(),
     val showAddTaskDialog: Boolean = false,
     val editingTask: Task? = null,
+    /** #12：编辑中的任务是否属于导入子计划本（只读快照，禁编辑/删除） */
+    val editingTaskReadOnly: Boolean = false,
     /** 新建任务时的预填模板（点空白时段时预填日期+时段，PRD 4.2.2） */
     val prefillTask: Task? = null,
     val isLoading: Boolean = false
@@ -182,11 +184,14 @@ class PlanBookViewModel @Inject constructor(
         }
     }
 
-    /** 点击任务：加载原始任务（避免展开后的单日 copy 覆盖原始区间），打开编辑器 */
+    /** 点击任务：加载原始任务（避免展开后的单日 copy 覆盖原始区间），打开编辑器。
+     *  #12：任务属于导入子计划本时标记只读（快照语义，禁编辑/删除，勾选完成不受限）。 */
     fun openTaskEditor(task: Task) {
         viewModelScope.launch {
             val original = repository.getTaskById(task.id)
-            _uiState.update { it.copy(editingTask = original ?: task) }
+            val resolved = original ?: task
+            val readOnly = _uiState.value.notebooks.any { it.id == resolved.notebookId && it.isImported }
+            _uiState.update { it.copy(editingTask = resolved, editingTaskReadOnly = readOnly) }
         }
     }
 

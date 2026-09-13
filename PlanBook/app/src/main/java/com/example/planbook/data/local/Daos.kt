@@ -22,6 +22,10 @@ interface NotebookDao {
     @Query("SELECT * FROM notebooks WHERE id = :notebookId LIMIT 1")
     suspend fun getById(notebookId: Long): NotebookEntity?
 
+    /** #12：按源文件名找已有导入子计划本（重导整本重建的匹配依据） */
+    @Query("SELECT * FROM notebooks WHERE parentId = :masterId AND importSource = :sourceName LIMIT 1")
+    suspend fun getImportedBySource(masterId: Long, sourceName: String): NotebookEntity?
+
     @Insert
     suspend fun insert(notebook: NotebookEntity): Long
 

@@ -67,24 +67,37 @@ class PlanBookRepository @Inject constructor(
         )
     }
 
+    /** #11/#12：ICS 导入结果（replacedOld = 是否替换了同名旧导入子本） */
+    data class IcsImportResult(val subNotebookId: Long, val replacedOld: Boolean)
+
     /**
      * #11（ADR-0005）：ICS 导入建本——生成导入子计划本（只读快照标记 importSource），
      * 任务为解析展开出的单天临时任务（教室 · 老师进备注）。
-     * 默认打开显示开关、不抢占活动状态。整体在一个事务里：失败回滚，不产生半成品。
+     * 默认打开显示开关、不抢占活动状态。
+     * #12：同 importSource（源文件名）的旧导入子本整本删除重建，完成态随之丢弃（快照语义）；
+     * 若旧本恰为活动子本，新本继承活动态。整体在一个事务里：失败回滚，不产生半成品。
      */
     suspend fun importIcsSubNotebook(
         masterId: Long,
         sourceName: String,
         icsTasks: List<com.example.planbook.data.ics.IcsTask>
-    ): Long = db.withTransaction {
+    ): IcsImportResult = db.withTransaction {
+        // #12：重导整本重建——先删同名旧导入子本（含其任务）
+        val old = db.notebookDao().getImportedBySource(masterId, sourceName)
+        var inheritActive = false
+        if (old != null) {
+            db.taskDao().deleteByNotebook(old.id)
+            db.notebookDao().deleteById(old.id)
+            inheritActive = old.isActive
+        }
         val existing = db.notebookDao().getSubNotebooksOnce(masterId)
         val subId = db.notebookDao().insert(
             NotebookEntity(
                 name = sourceName,
                 parentId = masterId,
-                color = SubNotebookPalette.forIndex(existing.size),
+                color = old?.color ?: SubNotebookPalette.forIndex(existing.size), // 保留旧本颜色，用户改过的不丢
                 isVisible = true,
-                isActive = false,
+                isActive = inheritActive,
                 importSource = sourceName
             )
         )
@@ -102,7 +115,7 @@ class PlanBookRepository @Inject constructor(
                 )
             )
         }
-        subId
+        IcsImportResult(subId, replacedOld = old != null)
     }
 
     /** 切换活动子计划本（写操作目标） */
