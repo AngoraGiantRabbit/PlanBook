@@ -31,6 +31,7 @@ fun TaskEditSheet(
     val isNew = existing == null
     var title by remember { mutableStateOf(existing?.title ?: "") }
     var description by remember { mutableStateOf(existing?.description ?: "") }
+    var location by remember { mutableStateOf(existing?.location ?: "") }
     var selectedType by remember { mutableStateOf(existing?.type ?: TaskType.ONE_OFF) }
     var startDate by remember { mutableStateOf(existing?.startDate ?: LocalDate.now().toString()) }
     var endDate by remember { mutableStateOf(existing?.endDate ?: LocalDate.now().toString()) }
@@ -80,6 +81,15 @@ fun TaskEditSheet(
                     value = description,
                     onValueChange = { description = it },
                     label = { Text("备注（可选）") },
+                    enabled = !readOnly,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = location,
+                    onValueChange = { location = it },
+                    label = { Text("教室（可选，显示在任务块上）") },
                     enabled = !readOnly,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -212,6 +222,7 @@ fun TaskEditSheet(
                                 notebookId = notebookId,
                                 title = title,
                                 description = description,
+                                location = location.takeIf { it.isNotBlank() },
                                 type = selectedType,
                                 startDate = finalStart,
                                 endDate = finalEnd,

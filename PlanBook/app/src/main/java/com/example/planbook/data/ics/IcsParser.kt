@@ -18,8 +18,9 @@ import java.time.temporal.TemporalAdjusters
  *   解析前先展开。
  * - VEVENT：BEGIN:VEVENT ... END:VEVENT，多个 VEVENT 相互独立展开；
  *   VEVENT 内嵌套的子块（如 VALARM）整体忽略。
- * - 字段：SUMMARY → title；LOCATION、DESCRIPTION → description，两者都有时合成为
- *   "LOCATION · DESCRIPTION"（各自 trim，空片段跳过，两者皆无则为空串）。
+ * - 字段：SUMMARY → title；LOCATION → location（独立字段，块内显示用）；
+ *   DESCRIPTION → description：命中「教师：X」「全称：Y」模式时重组为
+ *   "教师：X；全称：Y"（仅含命中段，周次等其余内容丢弃），否则保留反转义原文。
  *   文本值按 RFC 5545 反转义：`\n`/`\N` → 换行，`\,` → `,`，`\;` → `;`，`\\` → `\`。
  * - 日期时间值（DTSTART/DTEND/EXDATE/UNTIL 通用）支持三种形式：
  *   `YYYYMMDDTHHMMSSZ`（UTC：Z 直接去掉，按本地时间处理，不做时区换算）、
@@ -27,6 +28,11 @@ import java.time.temporal.TemporalAdjusters
  *   属性参数（`TZID=...`、`VALUE=DATE` 等）一律忽略，取第一个 ':' 之后的值。
  * - EXDATE：按日期排除出现（值里的时间分量忽略）。同一行逗号分隔多个值，
  *   多个 EXDATE 行累积生效。
+ * - RDATE：显式列举的额外出现日期（教务系统课表常见形态：DTSTART + 一串 RDATE，
+ *   不用 RRULE）。与 RRULE 展开结果取并集去重后按日期升序输出；
+ *   不受 COUNT/UNTIL/365 天上界约束（显式实例优先于规则生成），
+ *   但会被 EXDATE 排除；实例时刻统一沿用 DTSTART 的时刻。
+ *   同一行逗号分隔多值、多行 RDATE 累积生效，属性参数（TZID 等）忽略。
  *
  * ## RRULE 语义（仅 FREQ=WEEKLY；其他 FREQ 或整行无法解析时退化为 DTSTART 单次出现）
  * - BYDAY=MO,...,SU：缺省用 DTSTART 自己的星期几。若 DTSTART 本身不匹配 BYDAY，
@@ -130,27 +136,47 @@ object IcsParser {
         val title = props.firstOrNull { it.first == "SUMMARY" }?.second
             ?.let { unescape(it).trim() }.orEmpty()
         val location = props.firstOrNull { it.first == "LOCATION" }?.second
-            ?.let { unescape(it).trim() }.orEmpty()
-        val note = props.firstOrNull { it.first == "DESCRIPTION" }?.second
-            ?.let { unescape(it).trim() }.orEmpty()
-        val description = listOf(location, note).filter { it.isNotEmpty() }.joinToString(" · ")
+            ?.let { unescape(it).trim() }?.takeIf { it.isNotEmpty() }
+        val description = props.firstOrNull { it.first == "DESCRIPTION" }?.second
+            ?.let { buildDescription(unescape(it).trim()) }.orEmpty()
         val rule = props.firstOrNull { it.first == "RRULE" }?.second?.let(::parseRule)
         val exdates = props.filter { it.first == "EXDATE" }
+            .flatMap { (_, value) -> value.split(',') }
+            .mapNotNull { parseDateTimeValue(it)?.date }
+            .toSet()
+        // RDATE：显式列举的额外出现日期（时刻分量忽略，统一沿用 DTSTART 时刻）
+        val rdates = props.filter { it.first == "RDATE" }
             .flatMap { (_, value) -> value.split(',') }
             .mapNotNull { parseDateTimeValue(it)?.date }
             .toSet()
         val startTime = dtStart.time?.format(TIME_FORMAT)
         val endTime = dtEnd?.time?.format(TIME_FORMAT)
 
-        return expandDates(dtStart.date, rule, exdates).map {
+        return expandDates(dtStart.date, rule, exdates, rdates).map {
             IcsTask(
                 title = title,
                 description = description,
+                location = location,
                 date = it,
                 startTime = startTime,
                 endTime = endTime
             )
         }
+    }
+
+    /** 「教师：X」「全称：Y」段抽取（分号/换行分隔），命中任一则重组、周次等内容丢弃 */
+    private val teacherRe = Regex("教师：([^；;\n]+)")
+    private val fullNameRe = Regex("全称：([^；;\n]+)")
+
+    private fun buildDescription(raw: String): String {
+        if (raw.isEmpty()) return raw
+        val teacher = teacherRe.find(raw)?.groupValues?.get(1)?.trim()
+        val fullName = fullNameRe.find(raw)?.groupValues?.get(1)?.trim()
+        if (teacher == null && fullName == null) return raw
+        return listOfNotNull(
+            teacher?.takeIf { it.isNotEmpty() }?.let { "教师：$it" },
+            fullName?.takeIf { it.isNotEmpty() }?.let { "全称：$it" }
+        ).joinToString("；")
     }
 
     private class DateTimeVal(val date: LocalDate, val time: LocalTime?)
@@ -225,11 +251,17 @@ object IcsParser {
     }
 
     /**
-     * 从 DTSTART 起按周生成出现日期，再移除 EXDATE。
-     * 逐周（ISO 周一为一周开始）、周内按星期升序迭代，保证整体时间有序，
-     * 因此命中 UNTIL/COUNT/365 天上界即可立即停止。
+     * 从 DTSTART 起按周生成出现日期（RRULE），与 RDATE 显式实例并集去重，
+     * 再移除 EXDATE。RRULE 部分逐周（ISO 周一为一周开始）、周内按星期升序迭代，
+     * 保证整体时间有序，因此命中 UNTIL/COUNT/365 天上界即可立即停止；
+     * RDATE 不受这些上界约束（显式列举优先）。
      */
-    private fun expandDates(dtStart: LocalDate, rule: WeeklyRule?, exdates: Set<LocalDate>): List<LocalDate> {
+    private fun expandDates(
+        dtStart: LocalDate,
+        rule: WeeklyRule?,
+        exdates: Set<LocalDate>,
+        rdates: Set<LocalDate>
+    ): List<LocalDate> {
         val dates = if (rule == null) {
             listOf(dtStart)
         } else {
@@ -263,7 +295,7 @@ object IcsParser {
             }
             out
         }
-        return dates.filter { it !in exdates }
+        return (dates + rdates).toSortedSet().filter { it !in exdates }
     }
 
     /** RFC 5545 文本反转义：`\n`/`\N` → 换行，`\,` → `,`，`\;` → `;`，`\\` → `\`；其他 `\x` 原样保留。 */

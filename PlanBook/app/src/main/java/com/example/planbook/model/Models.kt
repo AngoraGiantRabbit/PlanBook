@@ -48,6 +48,8 @@ data class Task(
     val notebookId: Long,
     val title: String,
     val description: String = "",
+    /** 教室/地点（ICS LOCATION；块内显示用） */
+    val location: String? = null,
     val type: TaskType,
     val startDate: String,     // yyyy-MM-dd
     val endDate: String,       // yyyy-MM-dd

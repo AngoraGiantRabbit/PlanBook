@@ -31,6 +31,8 @@ data class TaskEntity(
     val notebookId: Long,
     val title: String,
     val description: String = "",
+    /** 教室/地点（ICS LOCATION；块内显示用，其余备注进 description 仅详情可见） */
+    val location: String? = null,
     val type: String,          // FLEX, ONE_OFF, DAILY, LONG_TERM
     val startDate: String,     // yyyy-MM-dd
     val endDate: String,       // yyyy-MM-dd

@@ -13,7 +13,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ReviewSettingEntity::class,
         TaskCompletionEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class PlanBookDatabase : RoomDatabase() {
@@ -86,6 +86,16 @@ abstract class PlanBookDatabase : RoomDatabase() {
         val MIGRATION_4_5 = object : Migration(4, 5) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `notebooks` ADD COLUMN `importSource` TEXT")
+            }
+        }
+
+        /**
+         * v5 → v6：tasks 增加 location 列（教室，ICS LOCATION）。
+         * 可空列零风险；块内显示教室、其余备注仅详情可见。
+         */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `tasks` ADD COLUMN `location` TEXT")
             }
         }
     }

@@ -183,8 +183,8 @@ class IcsParserTest {
         assertEquals(9, secondHalf.size)
         assertTrue(firstHalf.all { it.startTime == "08:00" && it.endTime == "09:40" })
         assertTrue(secondHalf.all { it.startTime == "10:00" && it.endTime == "11:40" })
-        assertTrue(firstHalf.all { it.description == "303教室 · 张老师" })
-        assertTrue(secondHalf.all { it.description == "304教室 · 李老师" })
+        assertTrue(firstHalf.all { it.location == "303教室" && it.description == "张老师" })
+        assertTrue(secondHalf.all { it.location == "304教室" && it.description == "李老师" })
     }
 
     @Test
@@ -217,10 +217,20 @@ class IcsParserTest {
             return IcsParser.parse(lines.joinToString("\r\n")).single()
         }
 
-        assertEquals("303教室 · 张老师", event(" 303教室 ", "张老师").description) // 各自 trim
-        assertEquals("303教室", event("303教室", null).description)
+        // LOCATION 独立成字段，不再拼进备注
+        assertEquals("303教室", event(" 303教室 ", null).location) // trim
+        assertNull(event(" ", "张老师").location)                    // 空白视为无
+        // 无教师/全称模式的 DESCRIPTION 原样保留
         assertEquals("张老师", event(null, "张老师").description)
-        assertEquals("", event(" ", null).description) // 空白片段跳过
+        // 教务系统典型形态：全称/教师/周次 → 重组为「教师；全称」，周次丢弃
+        val registry = event(
+            "305-106",
+            "全称：数值计算方法；教师：王红霞；周次：第3\\,7-9\\,11-12周（第1周为8月31日）"
+        )
+        assertEquals("教师：王红霞；全称：数值计算方法", registry.description)
+        assertEquals("305-106", registry.location)
+        // 只有教师
+        assertEquals("教师：王红霞", event(null, "教师：王红霞；周次：第3周").description)
     }
 
     @Test
@@ -335,6 +345,75 @@ class IcsParserTest {
         )
         assertEquals(
             listOf(d(2026, 9, 9), d(2026, 9, 16), d(2026, 9, 23), d(2026, 9, 30)),
+            dates(tasks)
+        )
+    }
+
+    // ---------- RDATE（教务课表常见形态：DTSTART + 一串显式日期） ----------
+
+    @Test
+    fun rdate_withoutRrule_expandsAllExplicitDates() {
+        val tasks = IcsParser.parse(
+            ics(
+                "BEGIN:VCALENDAR", "BEGIN:VEVENT",
+                "SUMMARY:数值",
+                "DTSTART;TZID=Asia/Shanghai:20260915T080000",
+                "DTEND;TZID=Asia/Shanghai:20260915T094000",
+                "RDATE;TZID=Asia/Shanghai:20261013T080000,20261020T080000,20261027T080000,",
+                " 20261110T080000,20261117T080000", // 折行 + 一行多值
+                "RDATE;TZID=Asia/Shanghai:20261201T080000", // 多行累积
+                "LOCATION:305-106",
+                "DESCRIPTION:全称：数值计算方法；教师：王红霞；周次：第3周",
+                "END:VEVENT", "END:VCALENDAR"
+            )
+        )
+        assertEquals(
+            listOf(
+                d(2026, 9, 15), d(2026, 10, 13), d(2026, 10, 20), d(2026, 10, 27),
+                d(2026, 11, 10), d(2026, 11, 17), d(2026, 12, 1)
+            ),
+            dates(tasks)
+        )
+        // 实例时刻统一沿用 DTSTART；location/重组备注生效
+        assertTrue(tasks.all { it.startTime == "08:00" && it.endTime == "09:40" })
+        assertTrue(tasks.all { it.location == "305-106" })
+        assertTrue(tasks.all { it.description == "教师：王红霞；全称：数值计算方法" })
+    }
+
+    @Test
+    fun rdate_withRrule_mergedAndDeduped() {
+        val tasks = IcsParser.parse(
+            ics(
+                "BEGIN:VCALENDAR", "BEGIN:VEVENT",
+                "SUMMARY:课",
+                "DTSTART:20260907T080000", // 周一
+                "RRULE:FREQ=WEEKLY;BYDAY=MO;UNTIL=20260921", // 09-07、09-14、09-21
+                "RDATE:20260909T080000",   // 额外补一个周三（非规则内）
+                "RDATE:20260914T080000",   // 与规则重复，应去重
+                "END:VEVENT", "END:VCALENDAR"
+            )
+        )
+        assertEquals(
+            listOf(d(2026, 9, 7), d(2026, 9, 9), d(2026, 9, 14), d(2026, 9, 21)),
+            dates(tasks)
+        )
+    }
+
+    @Test
+    fun rdate_notLimitedByCount_removedByExdate() {
+        val tasks = IcsParser.parse(
+            ics(
+                "BEGIN:VCALENDAR", "BEGIN:VEVENT",
+                "SUMMARY:课",
+                "DTSTART:20260907T080000",
+                "RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=2", // 09-07、09-14
+                "RDATE:20261005T080000,20261102T080000", // 显式实例不受 COUNT 限制
+                "EXDATE:20261102",                      // 但可被 EXDATE 排除
+                "END:VEVENT", "END:VCALENDAR"
+            )
+        )
+        assertEquals(
+            listOf(d(2026, 9, 7), d(2026, 9, 14), d(2026, 10, 5)),
             dates(tasks)
         )
     }

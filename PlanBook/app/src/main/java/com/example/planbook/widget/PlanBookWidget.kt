@@ -46,6 +46,7 @@ private data class WidgetDay(
 private data class WidgetTask(
     val timeText: String,
     val title: String,
+    val location: String?,
     val color: Color?
 )
 
@@ -222,6 +223,7 @@ class PlanBookWidget : GlanceAppWidget() {
                     WidgetTask(
                         timeText = "${t.startTime}-${t.endTime ?: t.startTime}",
                         title = t.title,
+                        location = t.location?.takeIf { it.isNotBlank() },
                         color = colorMap[t.notebookId]
                     )
                 }
@@ -292,6 +294,13 @@ private fun androidx.glance.layout.RowScope.DayColumn(day: WidgetDay) {
                     text = t.title,
                     style = TextStyle(color = ColorProvider(Color.Black), fontSize = 10.sp)
                 )
+                // 块内只显示教室；其余备注（教师等）在 App 任务详情查看
+                if (t.location != null) {
+                    Text(
+                        text = t.location,
+                        style = TextStyle(color = ColorProvider(Color.DarkGray), fontSize = 9.sp)
+                    )
+                }
             }
         }
     }

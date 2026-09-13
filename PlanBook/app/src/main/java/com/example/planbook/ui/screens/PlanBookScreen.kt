@@ -379,10 +379,10 @@ fun TaskBlock(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            // #9：备注小字行（ICS 课程表显示「教室 · 老师」的呈现基础）
-            if (task.description.isNotBlank()) {
+            // 块内只显示教室（location，来自 ICS LOCATION）；教师等其余备注仅详情可见
+            if (!task.location.isNullOrBlank()) {
                 Text(
-                    text = task.description,
+                    text = task.location,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

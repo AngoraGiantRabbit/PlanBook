@@ -22,8 +22,12 @@ object DatabaseModule {
             PlanBookDatabase::class.java,
             "planbook.db"
         )
-            // v3→v4 主/子计划本迁移、v4→v5 导入标记列（#11）；更早版本仍走破坏性重建
-            .addMigrations(PlanBookDatabase.MIGRATION_3_4, PlanBookDatabase.MIGRATION_4_5)
+            // v3→v4 主/子计划本迁移、v4→v5 导入标记列、v5→v6 任务教室列；更早版本仍走破坏性重建
+            .addMigrations(
+                PlanBookDatabase.MIGRATION_3_4,
+                PlanBookDatabase.MIGRATION_4_5,
+                PlanBookDatabase.MIGRATION_5_6
+            )
             .fallbackToDestructiveMigration()
             .build()
     }
