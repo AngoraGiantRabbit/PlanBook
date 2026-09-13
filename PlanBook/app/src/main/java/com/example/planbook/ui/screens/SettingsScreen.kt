@@ -62,7 +62,7 @@ fun SettingsScreen(
             Text("计划本", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedButton(onClick = onManageNotebooks, modifier = Modifier.fillMaxWidth()) {
-                Text("计划本管理（重命名 / 删除 / 合并）")
+                Text("计划本管理（子计划本：新建 / 显示 / 活动 / 颜色）")
             }
         }
     }

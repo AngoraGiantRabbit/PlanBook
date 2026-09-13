@@ -1,46 +1,54 @@
 package com.example.planbook.ui.screens
 
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.example.planbook.model.MergeConflict
-import kotlinx.coroutines.launch
-import com.example.planbook.model.MergeResolution
 import com.example.planbook.model.Notebook
-import com.example.planbook.viewmodel.PlanBookViewModel
+import com.example.planbook.viewmodel.NotebookManagerViewModel
 
 /**
- * 计划本管理页（PRD 4.1.3 / 4.1.4）：
- * 列表 + 重命名 + 删除 + 合并。
+ * 子计划本管理页（设置页入口，ADR-0004）：
+ * 列表 + 新建 + 重命名 + 删除 + 活动切换 + 显示开关 + 颜色。
+ * 旧「合并计划本」入口随 ADR-0004 废弃，已移除。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NotebookManagerScreen(
     onBack: () -> Unit,
-    viewModel: PlanBookViewModel = hiltViewModel()
+    viewModel: NotebookManagerViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    var showMergeDialog by remember { mutableStateOf(false) }
+    val canDelete = uiState.subs.size > 1
+
+    var showCreateDialog by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<Notebook?>(null) }
+    var deleting by remember { mutableStateOf<Notebook?>(null) }
+    var coloring by remember { mutableStateOf<Notebook?>(null) }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("计划本管理") },
+                title = { Text("子计划本管理") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -54,178 +62,246 @@ fun NotebookManagerScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
+            Text(
+                "活动子计划本是首页新建任务的落点；显示开关只控制是否在计划本页聚合显示。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            )
             LazyColumn(modifier = Modifier.weight(1f)) {
-                items(uiState.notebooks, key = { it.id }) { notebook ->
-                    NotebookManagerRow(
-                        notebook = notebook,
-                        // #7：列表为子计划本，「当前」= 活动子计划本（写操作目标）
-                        isCurrent = notebook.id == uiState.activeSubNotebook?.id,
-                        canDelete = uiState.notebooks.size > 1,
-                        onRename = { renaming = notebook },
-                        onDelete = { viewModel.deleteNotebook(notebook) },
-                        onSwitch = { viewModel.switchNotebook(notebook) }
+                items(uiState.subs, key = { it.id }) { sub ->
+                    SubNotebookRow(
+                        notebook = sub,
+                        isActive = sub.id == uiState.activeSubId,
+                        canDelete = canDelete,
+                        onSetActive = { viewModel.setActiveSubNotebook(sub.id) },
+                        onSetVisible = { viewModel.setSubNotebookVisible(sub.id, it) },
+                        onRename = { renaming = sub },
+                        onDelete = { deleting = sub },
+                        onPickColor = { coloring = sub }
                     )
                     HorizontalDivider()
                 }
             }
-            // 合并入口（至少两个计划本才能合并）
             Button(
-                onClick = { showMergeDialog = true },
-                enabled = uiState.notebooks.size >= 2,
+                onClick = { showCreateDialog = true },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp)
             ) {
-                Text("合并计划本")
+                Text("新建子计划本")
             }
         }
     }
 
-    // 重命名对话框
-    renaming?.let { nb ->
-        var name by remember { mutableStateOf(nb.name) }
-        AlertDialog(
-            onDismissRequest = { renaming = null },
-            title = { Text("重命名计划本") },
-            text = {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("计划本名称") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.renameNotebook(nb, name)
-                    renaming = null
-                }) { Text("保存") }
-            },
-            dismissButton = {
-                TextButton(onClick = { renaming = null }) { Text("取消") }
+    // 新建对话框（默认名 子计划本 N，N 取未被占用的最小序号）
+    if (showCreateDialog) {
+        val defaultName = remember(uiState.subs) { defaultSubName(uiState.subs) }
+        NameEditDialog(
+            title = "新建子计划本",
+            label = "子计划本名称",
+            initialName = defaultName,
+            onDismiss = { showCreateDialog = false },
+            onConfirm = { name ->
+                viewModel.createSubNotebook(name)
+                showCreateDialog = false
             }
         )
     }
 
-    // 合并流程
-    if (showMergeDialog) {
-        MergeFlow(
-            notebooks = uiState.notebooks,
-            viewModel = viewModel,
-            onDismiss = { showMergeDialog = false }
+    // 重命名对话框
+    renaming?.let { nb ->
+        NameEditDialog(
+            title = "重命名子计划本",
+            label = "子计划本名称",
+            initialName = nb.name,
+            onDismiss = { renaming = null },
+            onConfirm = { name ->
+                viewModel.renameSubNotebook(nb, name)
+                renaming = null
+            }
+        )
+    }
+
+    // 删除确认对话框
+    deleting?.let { nb ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            title = { Text("删除子计划本") },
+            text = { Text("确定删除「${nb.name}」吗？该子计划本的所有任务将一并删除。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteSubNotebook(nb)
+                    deleting = null
+                }) { Text("删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleting = null }) { Text("取消") }
+            }
+        )
+    }
+
+    // 颜色选择对话框
+    coloring?.let { nb ->
+        ColorPickerDialog(
+            notebook = nb,
+            colors = viewModel.paletteColors,
+            onPick = { color ->
+                viewModel.setSubNotebookColor(nb, color)
+                coloring = null
+            },
+            onDismiss = { coloring = null }
         )
     }
 }
 
+/** 默认名：子计划本 N（N 取未被占用的最小序号，避免与现存重名） */
+private fun defaultSubName(subs: List<Notebook>): String {
+    val names = subs.map { it.name }.toSet()
+    var n = subs.size + 1
+    while ("子计划本 $n" in names) n++
+    return "子计划本 $n"
+}
+
+/** "#RRGGBB" → Compose Color；格式非法时回退灰色 */
+private fun parseHexColor(hex: String?): Color {
+    if (hex != null && Regex("^#[0-9A-Fa-f]{6}$").matches(hex)) {
+        return Color(
+            red = hex.substring(1, 3).toInt(16),
+            green = hex.substring(3, 5).toInt(16),
+            blue = hex.substring(5, 7).toInt(16)
+        )
+    }
+    return Color(0xFF9E9E9E)
+}
+
 @Composable
-private fun NotebookManagerRow(
+private fun SubNotebookRow(
     notebook: Notebook,
-    isCurrent: Boolean,
+    isActive: Boolean,
     canDelete: Boolean,
+    onSetActive: () -> Unit,
+    onSetVisible: (Boolean) -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
-    onSwitch: () -> Unit
+    onPickColor: () -> Unit
 ) {
     ListItem(
+        leadingContent = {
+            Box(
+                modifier = Modifier
+                    .size(16.dp)
+                    .clip(CircleShape)
+                    .background(parseHexColor(notebook.color))
+            )
+        },
         headlineContent = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    notebook.name,
+                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                if (isActive) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer
+                    ) {
+                        Text(
+                            "活动",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+        },
+        supportingContent = {
             Text(
-                notebook.name + if (isCurrent) "（当前）" else "",
-                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal
+                if (isActive) "首页新建任务的落点" else "点击设为活动",
+                style = MaterialTheme.typography.bodySmall
             )
         },
         trailingContent = {
-            Row {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onPickColor) {
+                    Icon(Icons.Default.Palette, contentDescription = "颜色")
+                }
                 IconButton(onClick = onRename) {
                     Icon(Icons.Default.Edit, contentDescription = "重命名")
                 }
                 IconButton(onClick = onDelete, enabled = canDelete) {
                     Icon(Icons.Default.Delete, contentDescription = "删除")
                 }
+                Switch(checked = notebook.isVisible, onCheckedChange = onSetVisible)
             }
         },
-        modifier = Modifier.clickable(onClick = onSwitch)
+        modifier = Modifier.clickable(onClick = onSetActive)
     )
 }
 
-/** 合并流程：选两个计划本 → 检测冲突 → 逐条选 → 执行（PRD 4.1.4） */
+/** 新建 / 重命名共用：标题 + OutlinedTextField */
 @Composable
-private fun MergeFlow(
-    notebooks: List<Notebook>,
-    viewModel: PlanBookViewModel,
-    onDismiss: () -> Unit
-) {
-    var step by remember { mutableStateOf(0) } // 0=选源 1=选目标 2=冲突 3=完成
-    var sourceId by remember { mutableStateOf<Long?>(null) }
-    var targetId by remember { mutableStateOf<Long?>(null) }
-    var newName by remember { mutableStateOf("") }
-    var conflicts by remember { mutableStateOf<List<MergeConflict>>(emptyList()) }
-    val resolutions = remember { mutableStateMapOf<Long, MergeResolution>() }
-    val scope = rememberCoroutineScope()
-
-    when (step) {
-        0, 1 -> SelectNotebookStep(
-            title = if (step == 0) "选择计划本 A" else "选择计划本 B",
-            notebooks = notebooks,
-            excludeId = sourceId,
-            onSelected = { id ->
-                if (step == 0) {
-                    sourceId = id
-                    step = 1
-                } else {
-                    targetId = id
-                    val a = sourceId!!
-                    val aName = notebooks.first { it.id == a }.name
-                    val bName = notebooks.first { it.id == id }.name
-                    newName = "$aName + $bName"
-                    // 检测冲突（suspend，需协程）
-                    scope.launch {
-                        conflicts = viewModel.detectMergeConflicts(a, id)
-                        step = 2
-                    }
-                }
-            },
-            onDismiss = onDismiss
-        )
-        2 -> ConflictStep(
-            conflicts = conflicts,
-            newName = newName,
-            onNewNameChange = { newName = it },
-            onResolve = { taskId, res -> resolutions[taskId] = res },
-            onConfirm = {
-                viewModel.executeMerge(sourceId!!, targetId!!, newName, resolutions.toMap())
-                step = 3
-            },
-            onDismiss = onDismiss
-        )
-        3 -> AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text("合并完成") },
-            text = { Text("新计划本「$newName」已创建并设为当前计划本，原计划本保留。") },
-            confirmButton = {
-                TextButton(onClick = onDismiss) { Text("好的") }
-            }
-        )
-    }
-}
-
-@Composable
-private fun SelectNotebookStep(
+private fun NameEditDialog(
     title: String,
-    notebooks: List<Notebook>,
-    excludeId: Long?,
-    onSelected: (Long) -> Unit,
-    onDismiss: () -> Unit
+    label: String,
+    initialName: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
 ) {
+    var name by remember { mutableStateOf(initialName) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text(label) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(name.trim()) },
+                enabled = name.isNotBlank()
+            ) { Text("保存") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
+}
+
+/** 颜色选择：调色板色圈，当前色带勾选标记（4 个一行，避免窄屏溢出） */
+@Composable
+private fun ColorPickerDialog(
+    notebook: Notebook,
+    colors: List<String>,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("选择颜色") },
+        text = {
             Column {
-                notebooks.filter { it.id != excludeId }.forEach { nb ->
-                    ListItem(
-                        headlineContent = { Text(nb.name) },
-                        modifier = Modifier.clickable { onSelected(nb.id) }
-                    )
+                colors.chunked(4).forEach { rowColors ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        rowColors.forEach { hex ->
+                            ColorOption(
+                                hex = hex,
+                                selected = notebook.color == hex,
+                                onClick = { onPick(hex) }
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
                 }
             }
         },
@@ -237,62 +313,27 @@ private fun SelectNotebookStep(
 }
 
 @Composable
-private fun ConflictStep(
-    conflicts: List<MergeConflict>,
-    newName: String,
-    onNewNameChange: (String) -> Unit,
-    onResolve: (taskId: Long, res: MergeResolution) -> Unit,
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (conflicts.isEmpty()) "确认合并" else "解决冲突") },
-        text = {
-            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                OutlinedTextField(
-                    value = newName,
-                    onValueChange = onNewNameChange,
-                    label = { Text("新计划本名称") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                if (conflicts.isEmpty()) {
-                    Text("无时段冲突，全部任务将复制到新计划本。")
-                } else {
-                    Text("以下带时段任务存在冲突，请逐条选择：", style = MaterialTheme.typography.bodySmall)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    conflicts.forEach { c ->
-                        Text(
-                            "「${c.taskA.title}」(${c.taskA.startDate} ${c.taskA.startTime}) ↔ 「${c.taskB.title}」(${c.taskB.startDate} ${c.taskB.startTime})",
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(vertical = 4.dp)
-                        )
-                        Row {
-                            AssistChip(onClick = {
-                                onResolve(c.taskA.id, MergeResolution.KEEP_A)
-                                onResolve(c.taskB.id, MergeResolution.DROP)
-                            }, label = { Text("留 A") })
-                            Spacer(modifier = Modifier.width(8.dp))
-                            AssistChip(onClick = {
-                                onResolve(c.taskA.id, MergeResolution.DROP)
-                                onResolve(c.taskB.id, MergeResolution.KEEP_B)
-                            }, label = { Text("留 B") })
-                            Spacer(modifier = Modifier.width(8.dp))
-                            AssistChip(onClick = {
-                                onResolve(c.taskA.id, MergeResolution.DROP)
-                                onResolve(c.taskB.id, MergeResolution.DROP)
-                            }, label = { Text("都不留") })
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onConfirm) { Text("合并") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+private fun ColorOption(hex: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(parseHexColor(hex))
+            .border(
+                width = if (selected) 3.dp else 1.dp,
+                color = if (selected) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.outline,
+                shape = CircleShape
+            )
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        if (selected) {
+            Icon(
+                Icons.Default.Check,
+                contentDescription = "当前颜色",
+                tint = Color.White
+            )
         }
-    )
+    }
 }
