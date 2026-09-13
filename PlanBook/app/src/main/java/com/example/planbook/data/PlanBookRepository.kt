@@ -33,6 +33,10 @@ class PlanBookRepository @Inject constructor(
             else db.notebookDao().getSubNotebooks(master.id).map { list -> list.map { it.toModel() } }
         }
 
+    /** 一次性取指定主计划本下的全部子计划本（小部件等无 Flow 场景，#14） */
+    suspend fun getSubNotebooksOnce(masterId: Long): List<Notebook> =
+        db.notebookDao().getSubNotebooksOnce(masterId).map { it.toModel() }
+
     /** 活动子计划本（写操作目标，同一时刻仅一个） */
     fun getActiveSubOfMaster(): Flow<Notebook?> =
         db.notebookDao().getMaster().flatMapLatest { master ->
