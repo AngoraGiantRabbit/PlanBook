@@ -45,6 +45,9 @@ class ReviewViewModel @Inject constructor(
     private val _editState = MutableStateFlow(ReviewEditUiState())
     val editState: StateFlow<ReviewEditUiState> = _editState.asStateFlow()
 
+    /** 编辑页日期驱动源：任务观察管道按它切换 */
+    private val editDateState = MutableStateFlow<String?>(null)
+
     init {
         // 跟踪主计划本 + 子计划本 + 活动子本（ADR-0004）；复盘日期挂主计划本
         viewModelScope.launch {
@@ -58,6 +61,35 @@ class ReviewViewModel @Inject constructor(
                         it.copy(currentNotebook = master, subNotebooks = subs, activeSubNotebook = active)
                     }
                     master?.let { loadReviewDates(it.id) }
+                }
+        }
+        // 管道 2：编辑页任务数据（三页联动）——当日已完成 + 待细化长期任务，
+        // tasks/task_completions 任何写操作（含计划本/待办页勾选）即时重发
+        viewModelScope.launch {
+            combine(
+                repository.getMasterNotebook(),
+                repository.getSubNotebooksOfMaster(),
+                editDateState
+            ) { master, subs, date -> Triple(master, subs, date) }
+                .flatMapLatest { (master, subs, date) ->
+                    if (master == null || date == null) flowOf(null)
+                    else combine(
+                        repository.observeExpandedTasks(
+                            master.id,
+                            subs.filter { it.isVisible }.map { it.id },
+                            listOf(LocalDate.parse(date))
+                        ),
+                        repository.observeLongTermActive(master.id, LocalDate.now().toString())
+                    ) { expanded, longTerm ->
+                        expanded.filter { it.isCompleted } to longTerm
+                    }
+                }
+                .collect { data ->
+                    if (data != null) {
+                        _editState.update {
+                            it.copy(completedTasks = data.first, longTermTasks = data.second)
+                        }
+                    }
                 }
         }
     }
@@ -76,47 +108,44 @@ class ReviewViewModel @Inject constructor(
         _calendarState.update { it.copy(month = it.month.plusMonths(delta.toLong())) }
     }
 
-    /** 打开某日的复盘编辑页：加载内容 + 当日已完成任务 + 待细化长期任务（PRD 4.4.4） */
+    /** 打开某日的复盘编辑页：任务列表走观察管道自动跟随，这里只加载复盘文本（PRD 4.4.4）。
+     *  注意：review_edit 是独立导航路由、独立 VM 实例，不能依赖 calendarState（异步未就绪），
+     *  主计划本用 once 查询同步获取。 */
     fun openReviewEdit(date: String) {
-        val notebook = _calendarState.value.currentNotebook ?: return
-        val subIds = _calendarState.value.subNotebooks.map { it.id }
         _editState.update { it.copy(date = date, loaded = false) }
+        editDateState.value = date
         viewModelScope.launch {
-            val review = repository.getReview(notebook.id, date)
-            val completed = repository.getCompletedTasksForDate(notebook.id, subIds, date)
-            // DDL 未过的长期任务（PRD 4.4.4：待细化）
-            val longTerm = repository.getLongTermTasksActive(notebook.id, date)
+            val master = repository.getMasterNotebookOnce() ?: return@launch
+            val review = repository.getReview(master.id, date)
             _editState.update {
                 it.copy(
                     content = review?.content ?: "",
-                    completedTasks = completed,
-                    longTermTasks = longTerm,
                     loaded = true
                 )
             }
         }
     }
 
-    /** 自动保存：停止输入后调用（PRD 4.4.4：停止输入 1 秒后保存） */
+    /** 自动保存：停止输入后调用（PRD 4.4.4：停止输入 1 秒后保存）。
+     *  主计划本 once 查询（独立路由 VM 实例不依赖 calendarState，见 openReviewEdit 注释）。 */
     fun saveReviewContent(content: String) {
         _editState.update { it.copy(content = content) }
-        val notebook = _calendarState.value.currentNotebook ?: return
         val date = _editState.value.date
         viewModelScope.launch {
+            val master = repository.getMasterNotebookOnce() ?: return@launch
             repository.saveReview(
-                Review(notebookId = notebook.id, date = date, content = content)
+                Review(notebookId = master.id, date = date, content = content)
             )
         }
     }
 
-    /** 长期任务拆分：用拆分出的子任务（用户已编辑好的）新建一条，落到活动子计划本，原长期保留（PRD 4.4.4） */
+    /** 长期任务拆分：用拆分出的子任务（用户已编辑好的）新建一条，落到活动子计划本，原长期保留（PRD 4.4.4）。
+     *  任务列表由观察管道自动刷新，无需手动重载。 */
     fun splitLongTermTask(subTask: Task) {
-        val master = _calendarState.value.currentNotebook ?: return
-        val activeSubId = _calendarState.value.activeSubNotebook?.id ?: master.id
         viewModelScope.launch {
+            val master = repository.getMasterNotebookOnce() ?: return@launch
+            val activeSubId = repository.getActiveSubOfMaster().first()?.id ?: master.id
             repository.addTask(subTask.copy(id = 0, notebookId = activeSubId))
-            // 刷新编辑页，长期任务列表可能变化
-            openReviewEdit(_editState.value.date)
         }
     }
 }

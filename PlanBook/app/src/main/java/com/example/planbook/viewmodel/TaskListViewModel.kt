@@ -8,6 +8,7 @@ import com.example.planbook.model.Task
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.time.DayOfWeek
 import java.time.LocalDate
 import javax.inject.Inject
 
@@ -34,7 +35,11 @@ class TaskListViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(TaskListUiState())
     val uiState: StateFlow<TaskListUiState> = _uiState.asStateFlow()
 
+    /** 选中日驱动源：任务观察管道按它切换日 */
+    private val selectedDateState = MutableStateFlow(TaskListUiState().selectedDate)
+
     init {
+        // 管道 1：主/子/活动子本状态
         viewModelScope.launch {
             combine(
                 repository.getMasterNotebook(),
@@ -45,37 +50,48 @@ class TaskListViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(currentNotebook = master, subNotebooks = subs, activeSubNotebook = active)
                     }
-                    // 与计划本页同口径：只聚合显示开关打开的子计划本（#9）
-                    master?.let {
-                        loadDayTasks(
-                            it.id,
-                            subs.filter { s -> s.isVisible }.map { s -> s.id },
-                            _uiState.value.selectedDate
-                        )
-                    }
                 }
+        }
+        // 管道 2：当日任务（三页联动）——tasks/task_completions 任何写操作自动重发，
+        // 计划本页/复盘页的勾选在此即时反映
+        viewModelScope.launch {
+            combine(
+                repository.getMasterNotebook(),
+                repository.getSubNotebooksOfMaster(),
+                selectedDateState
+            ) { master, subs, date -> Triple(master, subs, date) }
+                .flatMapLatest { (master, subs, date) ->
+                    if (master == null) flowOf(emptyList())
+                    else repository.observeExpandedTasks(
+                        master.id,
+                        subs.filter { it.isVisible }.map { it.id },
+                        listOf(date)
+                    )
+                }
+                .collect { tasks ->
+                    _uiState.update { it.copy(tasks = tasks, loaded = true) }
+                }
+        }
+        // 首次触发该日所在周的复盘待办生成（写库后观察管道自动带回）
+        viewModelScope.launch {
+            val master = repository.getMasterNotebookOnce() ?: return@launch
+            repository.ensureAutoReviewTasks(master.id, selectedDateState.value.with(DayOfWeek.MONDAY))
         }
     }
 
     fun selectDate(date: LocalDate) {
         _uiState.update { it.copy(selectedDate = date) }
-        val master = _uiState.value.currentNotebook ?: return
-        loadDayTasks(master.id, _uiState.value.subNotebooks.filter { it.isVisible }.map { it.id }, date)
-    }
-
-    private fun loadDayTasks(masterId: Long, subNotebookIds: List<Long>, date: LocalDate) {
-        _uiState.update { it.copy(loaded = false) }
+        selectedDateState.value = date
+        // 与旧逻辑保持一致：切换日期时按需生成该日所在周的复盘待办
         viewModelScope.launch {
-            val tasks = repository.getTasksForDay(masterId, subNotebookIds, date)
-            _uiState.update { it.copy(tasks = tasks, loaded = true) }
+            val master = repository.getMasterNotebookOnce() ?: return@launch
+            repository.ensureAutoReviewTasks(master.id, date.with(DayOfWeek.MONDAY))
         }
     }
 
     fun toggleComplete(task: Task) {
         viewModelScope.launch {
             repository.toggleTaskComplete(task, _uiState.value.selectedDate.toString())
-            val master = _uiState.value.currentNotebook ?: return@launch
-            loadDayTasks(master.id, _uiState.value.subNotebooks.filter { it.isVisible }.map { it.id }, _uiState.value.selectedDate)
         }
     }
 
@@ -99,8 +115,6 @@ class TaskListViewModel @Inject constructor(
     fun addTask(task: Task) {
         viewModelScope.launch {
             repository.addTask(task)
-            val master = _uiState.value.currentNotebook ?: return@launch
-            loadDayTasks(master.id, _uiState.value.subNotebooks.filter { it.isVisible }.map { it.id }, _uiState.value.selectedDate)
             _uiState.update { it.copy(showAddDialog = false, prefillTask = null) }
         }
     }

@@ -60,6 +60,14 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE notebookId IN (:notebookIds) ORDER BY startDate, startTime")
     suspend fun getByNotebookIdsOnce(notebookIds: List<Long>): List<TaskEntity>
 
+    /** 三页联动：响应式版本——tasks 表任何写操作（含跨页面勾选/增删）自动重发 */
+    @Query("SELECT * FROM tasks WHERE notebookId IN (:notebookIds) ORDER BY startDate, startTime")
+    fun getByNotebookIds(notebookIds: List<Long>): Flow<List<TaskEntity>>
+
+    /** 三页联动：长期任务（活跃区间）响应式版本 */
+    @Query("SELECT * FROM tasks WHERE notebookId = :notebookId AND type = 'LONG_TERM' AND isCompleted = 0 AND startDate <= :today AND endDate >= :today ORDER BY endDate")
+    fun getLongTermActiveFlow(notebookId: Long, today: String): Flow<List<TaskEntity>>
+
     /** #7：删除子计划本时一并删除其任务 */
     @Query("DELETE FROM tasks WHERE notebookId = :notebookId")
     suspend fun deleteByNotebook(notebookId: Long)
@@ -148,6 +156,10 @@ interface TaskCompletionDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(completion: TaskCompletionEntity)
+
+    /** 三页联动：指定日期集的按天完成记录（响应式，写后自动重发） */
+    @Query("SELECT * FROM task_completions WHERE date IN (:dates)")
+    fun getByDates(dates: List<String>): Flow<List<TaskCompletionEntity>>
 
     @Query("DELETE FROM task_completions WHERE taskId = :taskId AND date = :date")
     suspend fun delete(taskId: Long, date: String)

@@ -4,6 +4,7 @@ import com.example.planbook.data.local.*
 import com.example.planbook.model.*
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -328,6 +329,43 @@ class PlanBookRepository @Inject constructor(
             completedMap[d.toString()] = db.taskCompletionDao().getCompletedTaskIds(d.toString()).toMutableSet()
         }
         return allTasks.flatMap { expandTaskWithCompletion(it, weekDays, completedMap) }
+    }
+
+    /**
+     * 三页联动（#联动）：响应式展开数据。tasks / task_completions 表的任何写操作
+     * （任意页面的勾选、增删、导入、复盘生成）都会让此 Flow 自动重发，
+     * 计划本 / 待办 / 复盘页共享同一数据源，勾选状态即时联动。
+     * 注意：不含惰性写副作用（过期标记/补色/复盘生成），那些由 [ensureDerivedData] 在动作时机触发，
+     * 其引发的写会自然回流到此 Flow。
+     */
+    fun observeExpandedTasks(
+        masterId: Long,
+        subNotebookIds: List<Long>,
+        days: List<LocalDate>
+    ): Flow<List<Task>> =
+        combine(
+            db.taskDao().getByNotebookIds(subNotebookIds + masterId),
+            db.taskCompletionDao().getByDates(days.map { it.toString() })
+        ) { taskEntities, completionEntities ->
+            val allTasks = taskEntities.map { it.toModel() }
+            val completedMap = completionEntities
+                .groupBy { it.date }
+                .mapValues { (_, list) -> list.map { it.taskId }.toMutableSet() }
+            allTasks.flatMap { expandTaskWithCompletion(it, days, completedMap) }
+        }
+
+    /** 响应式：当前活跃的长期任务（复盘页「待细化」用） */
+    fun observeLongTermActive(masterId: Long, today: String): Flow<List<Task>> =
+        db.taskDao().getLongTermActiveFlow(masterId, today).map { list -> list.map { it.toModel() } }
+
+    /**
+     * 惰性维护聚合（动作时机触发，均为幂等写）：
+     * 长期任务过期标记（ADR-0003）、迁移子本补色、按周生成复盘自动待办。
+     */
+    suspend fun ensureDerivedData(masterId: Long, weekStart: LocalDate) {
+        expireLongTermTasks()
+        ensureSubNotebookColors(masterId)
+        ensureAutoReviewTasks(masterId, weekStart)
     }
 
     /** 待办列表页：某一天该显示的所有任务（四类展开后落在该天的，加上长期任务） */
