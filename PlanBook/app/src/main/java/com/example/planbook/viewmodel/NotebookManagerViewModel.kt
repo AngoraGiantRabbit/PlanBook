@@ -30,15 +30,8 @@ class NotebookManagerViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(NotebookManagerUiState())
     val uiState: StateFlow<NotebookManagerUiState> = _uiState.asStateFlow()
 
-    /** 调色板全部颜色。colors 列表是私有的，借助 forIndex 的轮转特性枚举到出现重复为止。 */
-    val paletteColors: List<String> = buildList {
-        var i = 0
-        while (true) {
-            val c = SubNotebookPalette.forIndex(i)
-            if (contains(c)) break
-            add(c)
-        }
-    }
+    /** 调色板全部预设色（颜色选择弹窗用；修复：原循环枚举漏 i++ 只得 1 色） */
+    val paletteColors: List<String> = SubNotebookPalette.all
 
     init {
         viewModelScope.launch {

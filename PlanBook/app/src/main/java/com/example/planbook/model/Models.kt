@@ -40,6 +40,9 @@ object SubNotebookPalette {
         "#90A4AE"  // 灰蓝
     )
 
+    /** 全部预设色（颜色选择弹窗用） */
+    val all: List<String> get() = colors
+
     fun forIndex(index: Int): String = colors[((index % colors.size) + colors.size) % colors.size]
 }
 

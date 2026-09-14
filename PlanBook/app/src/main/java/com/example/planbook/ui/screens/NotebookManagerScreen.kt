@@ -23,7 +23,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -349,7 +351,7 @@ private fun NameEditDialog(
     )
 }
 
-/** 颜色选择：调色板色圈，当前色带勾选标记（4 个一行，避免窄屏溢出） */
+/** 颜色选择：预设调色板色圈（4 个一行）+ 自定义圈（HSV 调色盘任选颜色） */
 @Composable
 private fun ColorPickerDialog(
     notebook: Notebook,
@@ -357,6 +359,15 @@ private fun ColorPickerDialog(
     onPick: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    var showCustom by remember { mutableStateOf(false) }
+    if (showCustom) {
+        CustomColorPickerDialog(
+            initialHex = notebook.color,
+            onConfirm = onPick,
+            onDismiss = { showCustom = false }
+        )
+        return
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("选择颜色") },
@@ -374,12 +385,120 @@ private fun ColorPickerDialog(
                     }
                     Spacer(modifier = Modifier.height(12.dp))
                 }
+                // 自定义颜色入口（彩虹渐变圈）
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 4.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.sweepGradient(
+                                    listOf(
+                                        Color(0xFFE57373), Color(0xFFFFB74D), Color(0xFFFFF176),
+                                        Color(0xFF81C784), Color(0xFF4DD0E1), Color(0xFF7986CB),
+                                        Color(0xFFBA68C8), Color(0xFFE57373)
+                                    )
+                                )
+                            )
+                            .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                            .clickable { showCustom = true }
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("自定义颜色", style = MaterialTheme.typography.bodyMedium)
+                }
             }
         },
         confirmButton = {},
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("取消") }
         }
+    )
+}
+
+/** 自定义调色盘：HSV 三滑块 + 实时预览，确定后回调 "#RRGGBB" */
+@Composable
+private fun CustomColorPickerDialog(
+    initialHex: String?,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val initial = remember { parseHexColor(initialHex) }
+    val hsvStart = remember {
+        floatArrayOf(0f, 0f, 0f).also {
+            android.graphics.Color.colorToHSV(initial.toArgb(), it)
+        }
+    }
+    var hue by remember { mutableStateOf(hsvStart[0]) }
+    var sat by remember { mutableStateOf(hsvStart[1]) }
+    var bri by remember { mutableStateOf(hsvStart[2]) }
+    val current = Color.hsv(hue, sat, bri)
+    val currentHex = "#%06X".format(current.toArgb() and 0xFFFFFF)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("自定义颜色") },
+        text = {
+            Column {
+                // 预览
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(CircleShape)
+                            .background(current)
+                            .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(currentHex, style = MaterialTheme.typography.titleMedium)
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                // 色相：彩虹横带
+                Text("色相", style = MaterialTheme.typography.labelSmall)
+                SliderTrack(
+                    brush = Brush.horizontalGradient(
+                        (0..360 step 60).map { Color.hsv(it.toFloat(), 1f, 1f) }
+                    )
+                )
+                Slider(value = hue, onValueChange = { hue = it }, valueRange = 0f..360f)
+                // 饱和度：当前色相 白 → 纯色
+                Text("饱和度", style = MaterialTheme.typography.labelSmall)
+                SliderTrack(
+                    brush = Brush.horizontalGradient(
+                        listOf(Color.hsv(hue, 0f, 1f), Color.hsv(hue, 1f, 1f))
+                    )
+                )
+                Slider(value = sat, onValueChange = { sat = it }, valueRange = 0f..1f)
+                // 明度：黑 → 纯色
+                Text("明度", style = MaterialTheme.typography.labelSmall)
+                SliderTrack(
+                    brush = Brush.horizontalGradient(
+                        listOf(Color.hsv(hue, 1f, 0f), Color.hsv(hue, 1f, 1f))
+                    )
+                )
+                Slider(value = bri, onValueChange = { bri = it }, valueRange = 0f..1f)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(currentHex) }) { Text("确定") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
+}
+
+/** 滑块上方的颜色示意条 */
+@Composable
+private fun SliderTrack(brush: Brush) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(10.dp)
+            .clip(CircleShape)
+            .background(brush)
     )
 }
 
