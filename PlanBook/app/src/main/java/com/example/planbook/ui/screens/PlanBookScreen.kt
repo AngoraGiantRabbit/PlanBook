@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -124,7 +125,8 @@ fun PlanBookScreen(
                         },
                         onCellClick = { date, hour ->
                             viewModel.showAddTaskDialogWithPrefill(date, hour)
-                        }
+                        },
+                        onDelete = { viewModel.deleteTask(it) }
                     )
                 }
             }
@@ -149,7 +151,11 @@ fun PlanBookScreen(
             onDismiss = { viewModel.closeTaskEditor() },
             onConfirm = { viewModel.saveEditedTask(it) },
             onDelete = { viewModel.deleteTask(task) },
-            readOnly = uiState.editingTaskReadOnly
+            readOnly = uiState.editingTaskReadOnly,
+            onToggleComplete = {
+                viewModel.toggleTaskComplete(task)
+                viewModel.closeTaskEditor()
+            }
         )
     }
 }
@@ -178,7 +184,8 @@ fun WeekView(
     onSelectDate: (LocalDate) -> Unit,
     onToggleComplete: (Task) -> Unit,
     onTaskClick: (Task) -> Unit,
-    onCellClick: (date: String, hour: Int) -> Unit
+    onCellClick: (date: String, hour: Int) -> Unit,
+    onDelete: (Task) -> Unit = {}
 ) {
     val weekDays = (0..6).map { weekStart.plusDays(it.toLong()) }
     val formatter = DateTimeFormatter.ofPattern("MM/dd")
@@ -331,7 +338,8 @@ fun WeekView(
             title = "灵活待办 (${selectedDate.format(formatter)})",
             tasks = flexTasks,
             onToggleComplete = onToggleComplete,
-            onTaskClick = onTaskClick
+            onTaskClick = onTaskClick,
+            onDelete = onDelete
         )
 
         // 长期待办区域：仅当查看日落在 [startDate..DDL] 区间内的长期任务（ADR-0002）
@@ -345,7 +353,8 @@ fun WeekView(
         LongTermTaskArea(
             tasks = longTermTasks,
             onToggleComplete = onToggleComplete,
-            onTaskClick = onTaskClick
+            onTaskClick = onTaskClick,
+            onDelete = onDelete
         )
     }
 }
@@ -398,7 +407,8 @@ fun FlexibleTaskArea(
     title: String,
     tasks: List<Task>,
     onToggleComplete: (Task) -> Unit,
-    onTaskClick: (Task) -> Unit
+    onTaskClick: (Task) -> Unit,
+    onDelete: (Task) -> Unit = {}
 ) {
     val (completed, uncompleted) = tasks.partition { it.isCompleted }
 
@@ -414,7 +424,8 @@ fun FlexibleTaskArea(
                 FlexibleTaskItem(
                     task = task,
                     onToggle = { onToggleComplete(task) },
-                    onClick = { onTaskClick(task) }
+                    onClick = { onTaskClick(task) },
+                    onDelete = { onDelete(task) }
                 )
             }
             items(completed) { task ->
@@ -422,6 +433,7 @@ fun FlexibleTaskArea(
                     task = task,
                     onToggle = { onToggleComplete(task) },
                     onClick = { onTaskClick(task) },
+                    onDelete = { onDelete(task) },
                     isCompleted = true
                 )
             }
@@ -434,6 +446,7 @@ fun FlexibleTaskItem(
     task: Task,
     onToggle: () -> Unit,
     onClick: () -> Unit,
+    onDelete: () -> Unit = {},
     isCompleted: Boolean = false
 ) {
     Row(
@@ -454,6 +467,15 @@ fun FlexibleTaskItem(
             textDecoration = if (isCompleted) TextDecoration.LineThrough else TextDecoration.None,
             modifier = Modifier.weight(1f)
         )
+        // ✕ 删除（与编辑弹窗删除同效）
+        IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
+            Icon(
+                Icons.Default.Close,
+                contentDescription = "删除",
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 
@@ -462,7 +484,8 @@ fun FlexibleTaskItem(
 fun LongTermTaskArea(
     tasks: List<Task>,
     onToggleComplete: (Task) -> Unit,
-    onTaskClick: (Task) -> Unit
+    onTaskClick: (Task) -> Unit,
+    onDelete: (Task) -> Unit = {}
 ) {
     val (completed, uncompleted) = tasks.partition { it.isCompleted }
     if (tasks.isEmpty()) return
@@ -476,10 +499,21 @@ fun LongTermTaskArea(
         Spacer(modifier = Modifier.height(4.dp))
         LazyColumn(modifier = Modifier.heightIn(max = 120.dp)) {
             items(uncompleted) { task ->
-                LongTermTaskItem(task, onToggle = { onToggleComplete(task) }, onClick = { onTaskClick(task) })
+                LongTermTaskItem(
+                    task,
+                    onToggle = { onToggleComplete(task) },
+                    onClick = { onTaskClick(task) },
+                    onDelete = { onDelete(task) }
+                )
             }
             items(completed) { task ->
-                LongTermTaskItem(task, onToggle = { onToggleComplete(task) }, onClick = { onTaskClick(task) }, isCompleted = true)
+                LongTermTaskItem(
+                    task,
+                    onToggle = { onToggleComplete(task) },
+                    onClick = { onTaskClick(task) },
+                    onDelete = { onDelete(task) },
+                    isCompleted = true
+                )
             }
         }
     }
@@ -490,6 +524,7 @@ fun LongTermTaskItem(
     task: Task,
     onToggle: () -> Unit,
     onClick: () -> Unit,
+    onDelete: () -> Unit = {},
     isCompleted: Boolean = false
 ) {
     Row(
@@ -515,6 +550,15 @@ fun LongTermTaskItem(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        // ✕ 删除（与编辑弹窗删除同效）
+        IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
+            Icon(
+                Icons.Default.Close,
+                contentDescription = "删除",
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 

@@ -24,7 +24,11 @@ data class TaskListUiState(
     val tasks: List<Task> = emptyList(),
     val loaded: Boolean = false,
     val showAddDialog: Boolean = false,
-    val prefillTask: Task? = null
+    val prefillTask: Task? = null,
+    /** 条目点击打开的编辑任务（原始任务，非展开副本） */
+    val editingTask: Task? = null,
+    /** 编辑中的任务是否属于导入子计划本（只读快照） */
+    val editingTaskReadOnly: Boolean = false
 )
 
 @HiltViewModel
@@ -117,5 +121,33 @@ class TaskListViewModel @Inject constructor(
             repository.addTask(task)
             _uiState.update { it.copy(showAddDialog = false, prefillTask = null) }
         }
+    }
+
+    /** 条目点击：加载原始任务（避免展开后的单日 copy 覆盖原始区间），打开编辑器 */
+    fun openTaskEditor(task: Task) {
+        viewModelScope.launch {
+            val original = repository.getTaskById(task.id)
+            val resolved = original ?: task
+            val readOnly = _uiState.value.subNotebooks.any { it.id == resolved.notebookId && it.isImported }
+            _uiState.update { it.copy(editingTask = resolved, editingTaskReadOnly = readOnly) }
+        }
+    }
+
+    fun saveEditedTask(task: Task) {
+        viewModelScope.launch {
+            repository.updateTask(task)
+            _uiState.update { it.copy(editingTask = null) }
+        }
+    }
+
+    fun deleteTask(task: Task) {
+        viewModelScope.launch {
+            repository.deleteTask(task)
+            _uiState.update { it.copy(editingTask = null) }
+        }
+    }
+
+    fun closeTaskEditor() {
+        _uiState.update { it.copy(editingTask = null) }
     }
 }

@@ -1,10 +1,12 @@
 package com.example.planbook.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -83,7 +85,12 @@ fun TaskListScreen(
                         )
                     }
                     items(list) { task ->
-                        TaskRowWithTime(task = task, onToggle = { viewModel.toggleComplete(task) })
+                        TaskRowWithTime(
+                            task = task,
+                            onToggle = { viewModel.toggleComplete(task) },
+                            onClick = { viewModel.openTaskEditor(task) },
+                            onDelete = { viewModel.deleteTask(task) }
+                        )
                     }
                 }
             }
@@ -109,10 +116,31 @@ fun TaskListScreen(
             onConfirm = { viewModel.addTask(it) }
         )
     }
+
+    // 条目点击打开的编辑弹窗（与计划本页同款，含完成/删除；写库后三页观察管道联动）
+    state.editingTask?.let { task ->
+        TaskEditSheet(
+            notebookId = task.notebookId,
+            existing = task,
+            onDismiss = { viewModel.closeTaskEditor() },
+            onConfirm = { viewModel.saveEditedTask(it) },
+            onDelete = { viewModel.deleteTask(task) },
+            readOnly = state.editingTaskReadOnly,
+            onToggleComplete = {
+                viewModel.toggleComplete(task)
+                viewModel.closeTaskEditor()
+            }
+        )
+    }
 }
 
 @Composable
-private fun TaskRowWithTime(task: Task, onToggle: () -> Unit) {
+private fun TaskRowWithTime(
+    task: Task,
+    onToggle: () -> Unit,
+    onClick: () -> Unit = {},
+    onDelete: () -> Unit = {}
+) {
     val timeText = when (task.type) {
         TaskType.ONE_OFF -> task.startTime?.let { s -> "${s} - ${task.endTime ?: s}" } ?: "全天"
         TaskType.DAILY -> task.startTime?.let { s -> "${s} - ${task.endTime ?: s}" } ?: "每日"
@@ -122,6 +150,7 @@ private fun TaskRowWithTime(task: Task, onToggle: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(onClick = onClick)
             .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -134,6 +163,15 @@ private fun TaskRowWithTime(task: Task, onToggle: () -> Unit) {
                 textDecoration = if (task.isCompleted) TextDecoration.LineThrough else TextDecoration.None
             )
             Text(timeText, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        // ✕ 删除（与编辑弹窗删除同效）
+        IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
+            Icon(
+                Icons.Default.Close,
+                contentDescription = "删除",
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

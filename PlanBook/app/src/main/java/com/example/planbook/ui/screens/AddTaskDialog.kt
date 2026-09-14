@@ -15,8 +15,10 @@ import java.time.LocalDate
 /**
  * 复用的任务编辑表单：新建与编辑共用（PRD 4.3.3）。
  * 新建时 [existing] 传 null；编辑时传入待编辑任务。
+ * [onToggleComplete] 非空且为编辑场景时显示「完成/撤销完成」按钮（与勾选同效果）；
+ * 导入子计划本只读时仍可用（勾选不受限）。
  * [readOnly] = true 时为只读呈现（#12：导入子计划本是只读快照，
- * 不可编辑保存/删除；勾选完成不受此限制），仅保留关闭按钮。
+ * 不可编辑保存/删除；勾选完成不受此限制），仅保留关闭与完成按钮。
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -26,7 +28,8 @@ fun TaskEditSheet(
     onDismiss: () -> Unit,
     onConfirm: (Task) -> Unit,
     onDelete: (() -> Unit)? = null,
-    readOnly: Boolean = false
+    readOnly: Boolean = false,
+    onToggleComplete: (() -> Unit)? = null
 ) {
     val isNew = existing == null
     var title by remember { mutableStateOf(existing?.title ?: "") }
@@ -196,8 +199,15 @@ fun TaskEditSheet(
         },
         confirmButton = {
             if (readOnly) {
-                // #12：只读快照——无保存/删除入口
-                TextButton(onClick = onDismiss) { Text("关闭") }
+                // #12：只读快照——无保存/删除入口；完成（勾选）不受限
+                Row {
+                    if (onToggleComplete != null && existing != null) {
+                        TextButton(onClick = onToggleComplete) {
+                            Text(if (existing.isCompleted) "撤销完成" else "完成")
+                        }
+                    }
+                    TextButton(onClick = onDismiss) { Text("关闭") }
+                }
             } else {
                 Row {
                     if (!isNew && onDelete != null) {
@@ -206,6 +216,11 @@ fun TaskEditSheet(
                             colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
                         ) {
                             Text("删除")
+                        }
+                    }
+                    if (onToggleComplete != null && existing != null) {
+                        TextButton(onClick = onToggleComplete) {
+                            Text(if (existing.isCompleted) "撤销完成" else "完成")
                         }
                     }
                     TextButton(
