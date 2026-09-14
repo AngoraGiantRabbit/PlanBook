@@ -354,9 +354,9 @@ class PlanBookRepository @Inject constructor(
             allTasks.flatMap { expandTaskWithCompletion(it, days, completedMap) }
         }
 
-    /** 响应式：当前活跃的长期任务（复盘页「待细化」用） */
-    fun observeLongTermActive(masterId: Long, today: String): Flow<List<Task>> =
-        db.taskDao().getLongTermActiveFlow(masterId, today).map { list -> list.map { it.toModel() } }
+    /** 响应式：当前活跃的长期任务（复盘页「待细化」用；按可见子本集合+主本查询） */
+    fun observeLongTermActive(notebookIds: List<Long>, today: String): Flow<List<Task>> =
+        db.taskDao().getLongTermActiveFlow(notebookIds, today).map { list -> list.map { it.toModel() } }
 
     /**
      * 惰性维护聚合（动作时机触发，均为幂等写）：
@@ -392,12 +392,6 @@ class PlanBookRepository @Inject constructor(
         return dayTasks.filter { it.isCompleted }
     }
 
-    /** 活跃长期任务：今天落在开始日到 DDL 之间，按 DDL 升序（ADR-0002 / PRD 4.4.4） */
-    suspend fun getLongTermTasksActive(notebookId: Long, today: String): List<Task> {
-        expireLongTermTasks()
-        return db.taskDao().getLongTermActive(notebookId, today).map { it.toModel() }
-    }
-
     /**
      * ADR-0003：长期任务过 DDL 自动标记完成。惰性触发——在各查询入口处调用，
      * 避免引入后台定时任务（鸿蒙/卓易通环境下不可靠且耗电）。
@@ -419,10 +413,14 @@ class PlanBookRepository @Inject constructor(
     }
 
     private fun expandTask(task: Task, weekDays: List<LocalDate>): List<Task> {
-        // 长期任务不参与按天展开：活跃区间由 UI 按 selectedDate ∈ [startDate..DDL] 过滤，
-        // 这里始终单独返回原任务（ADR-0002）。
+        // 长期任务（ADR-0006 三页统一可见性）：仅当查看日落在 [startDate..DDL] 内才返回；
+        // 数据层统一做区间过滤，待办页/计划本页/小部件今日待办同口径。
         if (task.type == TaskType.LONG_TERM) {
-            return listOf(task)
+            val start = runCatching { LocalDate.parse(task.startDate) }.getOrNull()
+            val end = runCatching { LocalDate.parse(task.endDate) }.getOrNull()
+            return if (start != null && end != null && weekDays.any { it in start..end }) {
+                listOf(task)
+            } else emptyList()
         }
         val start = LocalDate.parse(task.startDate)
         val end = LocalDate.parse(task.endDate)

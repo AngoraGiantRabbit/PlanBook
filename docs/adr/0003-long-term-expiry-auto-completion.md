@@ -2,6 +2,11 @@
 
 长期任务一旦越过 DDL，即视为放弃/过期，由系统自动标记完成（`isCompleted = true`）并从所有视图消失，UI 内不可找回。触发方式为查询时惰性标记：在 `loadTasks` 等查询入口前执行 `UPDATE tasks SET isCompleted=1 WHERE type='LONG_TERM' AND endDate < today AND isCompleted=0`，不依赖后台定时任务。
 
+> **2026-09-14 修订（ADR-0006）**：可见性改由三页统一的区间过滤承担（查看日 ∈ [开始日..DDL]）；
+> 本决策保留其数据归档部分（过期未完成的仍惰性标记 isCompleted）。
+> "完成即从所有视图消失、不可找回"的表述由 ADR-0006 替代——手动完成的长期任务
+> 灰显可撤销直至 DDL，DDL 后一律不显示；过期标记不再使任务出现在复盘「当日完成」。
+
 ## Considered Options
 
 - **过期保留可见（变灰/移到底部）**：否决。用户明确表示过期即放弃，不希望它们继续占视觉位。

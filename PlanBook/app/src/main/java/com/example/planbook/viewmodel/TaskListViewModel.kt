@@ -76,10 +76,10 @@ class TaskListViewModel @Inject constructor(
                     _uiState.update { it.copy(tasks = tasks, loaded = true) }
                 }
         }
-        // 首次触发该日所在周的复盘待办生成（写库后观察管道自动带回）
+        // 首次触发惰性维护：复盘待办生成 + 长期任务过期标记（ADR-0003/0006，幂等）
         viewModelScope.launch {
             val master = repository.getMasterNotebookOnce() ?: return@launch
-            repository.ensureAutoReviewTasks(master.id, selectedDateState.value.with(DayOfWeek.MONDAY))
+            repository.ensureDerivedData(master.id, selectedDateState.value.with(DayOfWeek.MONDAY))
         }
     }
 

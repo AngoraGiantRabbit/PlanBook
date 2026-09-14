@@ -73,15 +73,41 @@ class ReviewViewModel @Inject constructor(
             ) { master, subs, date -> Triple(master, subs, date) }
                 .flatMapLatest { (master, subs, date) ->
                     if (master == null || date == null) flowOf(null)
-                    else combine(
-                        repository.observeExpandedTasks(
-                            master.id,
-                            subs.filter { it.isVisible }.map { it.id },
-                            listOf(LocalDate.parse(date))
-                        ),
-                        repository.observeLongTermActive(master.id, LocalDate.now().toString())
-                    ) { expanded, longTerm ->
-                        expanded.filter { it.isCompleted } to longTerm
+                    else {
+                        val viewDate = LocalDate.parse(date)
+                        combine(
+                            repository.observeExpandedTasks(
+                                master.id,
+                                subs.filter { it.isVisible }.map { it.id },
+                                listOf(viewDate)
+                            ),
+                            // 待细化按「查看日」的活跃区间（ADR-0006：复盘历史那天看到的是当时的）
+                            repository.observeLongTermActive(
+                                subs.filter { it.isVisible }.map { it.id } + master.id,
+                                viewDate.toString()
+                            )
+                        ) { expanded, longTerm ->
+                            val completed = expanded.filter { t ->
+                                if (t.type == TaskType.LONG_TERM) {
+                                    // 长期任务仅在「完成当天」出现于当日完成（ADR-0006）；
+                                    // 且完成日须在 DDL 内——过期自动标记（completedAt 在 DDL 后）不显示
+                                    val doneDay = t.completedAt?.let { ms ->
+                                        runCatching {
+                                            LocalDate.ofInstant(
+                                                java.time.Instant.ofEpochMilli(ms),
+                                                java.time.ZoneId.systemDefault()
+                                            )
+                                        }.getOrNull()
+                                    }
+                                    val ddl = runCatching { LocalDate.parse(t.endDate) }.getOrNull()
+                                    t.isCompleted && doneDay == viewDate &&
+                                        ddl != null && viewDate <= ddl
+                                } else {
+                                    t.isCompleted
+                                }
+                            }
+                            completed to longTerm
+                        }
                     }
                 }
                 .collect { data ->
