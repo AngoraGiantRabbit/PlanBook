@@ -14,8 +14,8 @@ android {
         minSdk = 26
         targetSdk = 35
         // 版本随切片迭代：每完成一批 issue，minor +1、versionCode +1（见 docs/agents 约定）
-        versionCode = 9
-        versionName = "1.8"
+        versionCode = 10
+        versionName = "1.9"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
