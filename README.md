@@ -28,22 +28,21 @@
 
 最低支持 Android 8.0（minSdk 26），目标 API 35。
 
-## 项目结构
-
 ```
 .
-├── PlanBook/               # 主应用（Android Gradle 项目）
+├── PlanBook/               # Android 版（Kotlin + Compose + Room，经卓易通运行）
+├── PlanBookHarmony/        # 鸿蒙原生版（ArkTS/ArkUI + RelationalStore + ArkTS 卡片）
 ├── Flux_aphone-master/     # 开源参考项目 Flux 的源码，仅作实现参考
 ├── docs/adr/               # 架构决策记录（ADR）
-├── CONTEXT.md              # 领域概念与统一语言
+├── CONTEXT.md              # 领域概念与统一语言（两版共用）
 └── PRD.md                  # 产品需求文档
 ```
 
 ## 构建
 
 1. 克隆仓库：`git clone https://github.com/AngoraGiantRabbit/PlanBook.git`
-2. 用 Android Studio（Ladybug 或更新版本）打开 `PlanBook/` 目录
-3. Sync Gradle 后直接运行 `app` 配置即可
+2. **Android 版**：用 Android Studio（Ladybug 或更新版本）打开 `PlanBook/` 目录，Sync Gradle 后直接运行 `app` 配置即可
+3. **鸿蒙原生版**：`bash PlanBookHarmony/tools/build.sh`（详见 [PlanBookHarmony/README.md](./PlanBookHarmony/README.md)）
 
 ## 文档
 

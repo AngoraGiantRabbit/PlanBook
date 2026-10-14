@@ -1,0 +1,24 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "周视图计划本（鸿蒙原生版）"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "周视图计划本：主计划本 + 子计划本，四类任务、ICS 课程表导入、复盘体系与桌面卡片"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "计划本"
+    },
+    {
+      "name": "PlanBookFormAbility_label",
+      "value": "计划本周视图卡片"
+    },
+    {
+      "name": "PlanBookFormAbility_desc",
+      "value": "一周日程网格与今日待办的只读桌面卡片"
+    }
+  ]
+}

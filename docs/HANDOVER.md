@@ -174,3 +174,15 @@ Repository.observeExpandedTasks(masterId, subIds, days)   ← 唯一展开/完�
 1. **改行为前先读 CONTEXT.md 和相关 ADR**——领域规则（尤其完成态双模型、长期任务可见性、导入快照语义）都定过决策，别凭直觉改；要推翻就走 ADR 修订（参考 0003→0006 的做法）
 2. **保持"写走 repository、读走观察管道"的纪律**——这是三页联动的根基；新页面照抄三个 VM 的管道模式（状态驱动 flatMapLatest）
 3. **版本号随手迭代**（minor+1/versionCode+1），提交信息按现有风格写清"改了什么+为什么+验证方式"——这个仓库的历史提交就是最好的变更日志
+
+## 10. 鸿蒙原生版（PlanBookHarmony）
+
+`PlanBookHarmony/` 是本 App 的**鸿蒙原生重写**（ArkTS/ArkUI + RelationalStore + ArkTS 卡片，API 26），
+2026-10 完成首版，功能与 Android 版对齐（四类任务、周视图、复盘体系、ICS 导入、只读桌面卡片、手动刷新）。
+领域语义仍以根目录 CONTEXT.md 与 docs/adr/ 为准，两版共用同一套决策。
+
+- 构建/测试：`bash PlanBookHarmony/tools/build.sh`（未签名 HAP）、`bash PlanBookHarmony/tools/test.sh`
+  （IcsParser 19 例，Node 直跑 .ets）；坑与规避见该目录 README（空格路径 → junction + JS 启动器）
+- 架构映射：Room Flow → Repository 写后通知总线；Compose → 状态管理 V2（@ObservedV2 VM）；
+  Glance → FormExtensionAbility + ArkTS 卡片；细节见 `PlanBookHarmony/README.md`
+- 已知差异：浅色固定主题（无深色模式）；DB 为全新 schema v6 起步（无迁移链，两版数据不互通）

@@ -1,0 +1,8 @@
+{
+  "modelVersion": "6.26.4",
+  "description": "PlanBook 鸿蒙原生版：周视图计划本",
+  "dependencies": {},
+  "devDependencies": {
+    "@ohos/hypium": "1.0.21"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "forms": [
+    {
+      "name": "PlanBookCard",
+      "displayName": "计划本周视图",
+      "description": "一周日程网格 + 今日待办（只读，在 App 内点刷新同步）",
+      "src": "./ets/widget/PlanBookCard.ets",
+      "uiSyntax": "arkts",
+      "window": {
+        "designWidth": 720
+      },
+      "isDefault": true,
+      "scheduledUpdateTime": "06:30",
+      "updateEnabled": false,
+      "defaultDimension": "2*4",
+      "supportDimensions": [
+        "2*4"
+      ],
+      "formVisibleNotify": false
+    }
+  ]
+}
