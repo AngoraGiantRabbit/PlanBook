@@ -42,7 +42,8 @@
 
 1. 克隆仓库：`git clone https://github.com/AngoraGiantRabbit/PlanBook.git`
 2. **Android 版**：用 Android Studio（Ladybug 或更新版本）打开 `PlanBook/` 目录，Sync Gradle 后直接运行 `app` 配置即可
-3. **鸿蒙原生版**：`bash PlanBookHarmony/tools/build.sh`（详见 [PlanBookHarmony/README.md](./PlanBookHarmony/README.md)）
+3. **鸿蒙原生版（v1.1.0）**：`bash PlanBookHarmony/tools/build.sh`，或 DevEco Studio 26 打开 `PlanBookHarmony/`
+   （详见 [PlanBookHarmony/README.md](./PlanBookHarmony/README.md)：功能、构建、卡片配置、踩坑指南）
 
 ## 文档
 

@@ -175,24 +175,44 @@ Repository.observeExpandedTasks(masterId, subIds, days)   ← 唯一展开/完�
 2. **保持"写走 repository、读走观察管道"的纪律**——这是三页联动的根基；新页面照抄三个 VM 的管道模式（状态驱动 flatMapLatest）
 3. **版本号随手迭代**（minor+1/versionCode+1），提交信息按现有风格写清"改了什么+为什么+验证方式"——这个仓库的历史提交就是最好的变更日志
 
-## 10. 鸿蒙原生版（PlanBookHarmony）
+## 10. 鸿蒙原生版（PlanBookHarmony）— v1.1.0
 
 `PlanBookHarmony/` 是本 App 的**鸿蒙原生重写**（ArkTS/ArkUI + RelationalStore + ArkTS 卡片，API 26），
-2026-10 完成首版，功能与 Android 版对齐（四类任务、周视图、复盘体系、ICS 导入、只读桌面卡片、手动刷新）。
-领域语义仍以根目录 CONTEXT.md 与 docs/adr/ 为准，两版共用同一套决策。
+领域语义与 Android 版共用根目录 CONTEXT.md 与 docs/adr/ 的全部决策。
 
-- 构建/测试：`bash PlanBookHarmony/tools/build.sh`（未签名 HAP）、`bash PlanBookHarmony/tools/test.sh`
-  （IcsParser 19 例，Node 直跑 .ets）；坑与规避见该目录 README（空格路径 → junction + JS 启动器）
+- 构建/测试：`bash PlanBookHarmony/tools/build.sh`、`bash PlanBookHarmony/tools/test.sh`
+  （IcsParser 19 例 + IcsExporter roundtrip 7 例，Node 直跑 .ets）；坑与规避见该目录 README
 - 架构映射：Room Flow → Repository 写后通知总线；Compose → 状态管理 V2（@ObservedV2 VM）；
-  Glance → FormExtensionAbility + ArkTS 卡片；细节见 `PlanBookHarmony/README.md`
-- 已知差异：浅色固定主题（无深色模式）；DB 为全新 schema v6 起步（无迁移链，两版数据不互通）
+  Glance → FormExtensionAbility + ArkTS 卡片
+- 已知差异：浅色固定主题（无深色模式）；DB 全新 schema 起步（现 v7，v6→v7 自动加列；两版数据不互通）
 
-### 10.1 卡片子系统（2026-10 第二版：多开/独立配置/卡内翻周/自动同步）
+### 10.1 卡片子系统（多开 · 独立配置 · 卡内翻周 · 自动同步）
 
-- 三张 ArkTS 卡片：今日待办（1x2/2x2）、周课表（2x4）、整页周课表（4x4）；
-  同卡可多开，每张经设置角标（`ability://CardConfigAbility`）独立勾选显示哪些子计划本
-  （`card_prefs` 表：formId → notebookIds/weekOffset）。
-- 卡内 `< >` 翻周 / `↻` 刷新走 postCardAction message → `onFormMessage`，翻周状态按 formId 持久化。
-- App 写操作后 2s 节流自动推送全部卡片（`WidgetSync.installAutoSync`）；App 内刷新按钮仍保留（惰性维护）。
-- 教学周数：`app_settings.termStart`（设置页配置，归一到周一），周视图标题与卡片显示「第 N 周」。
-- 首页长按子计划本 chip = 切显示开关。细节见 `PlanBookHarmony/README.md`。
+- 三张 ArkTS 卡片：今日待办（1x2/2x2）、周课表（2x4）、**整页周课表（4x4/6x4，
+  与 App 同构的时间网格**：08:00-24:00 逐时格线、课程按时刻定位、重叠并列分列、完整课名+教室）。
+- 同卡可多开（如一张自己的课表、一张对象的）；长按卡片 →「编辑卡片显示内容」
+  （`ability://CardConfigAbility`）独立勾选显示哪些子计划本（`card_prefs` 表：formId → notebookIds/weekOffset）。
+- 卡内 `< >` 翻周 / `↻` 刷新走 postCardAction message → **`onFormEvent`**（不是 onFormMessage！
+  踩过坑），翻周状态按 formId 持久化。
+- App 写操作后 2s 节流自动推送全部卡片（`WidgetSync.installAutoSync`）；失效 formId 自动摘除。
+- **卡片渲染两大坑**（都有解）：无子项占位 Column 的百分比高度会塌 0（改每项占满 2 小时）；
+  ForEach key 不含变化量则不重绘（数据加 `rev` 时间戳进所有 key）。
+
+### 10.2 手动课表 & ICS 导出 & 交互（v1.1.0）
+
+- **新建/编辑课表**：课表 = 带 `isTimetable` 标记的子本，定义（课程/时间段/学期）存
+  `notebooks.timetableJson`；编辑保存 = 事务整本重建任务。时间段 = 周几 × 第 a-b 节 × 第 a-b 教学周，
+  节次时间预置大学 10 节表。
+- **导出 ICS**：管理页 ⤴ → RFC 5545 文件（DocumentSavePicker）；roundtrip 单测保证可再导入还原。
+- **手势**：计划本页左右划翻周、待办页左右划切日（PanGesture，阈值 50vp）；
+  chip 点按 = 切活动子本、长按 = 切显示开关（隐藏 chip 留行内：半透明+删除线+虚线）。
+- **教学周数**：`app_settings.termStart`（设置页配置），App 标题与卡片显示「第 N 周」。
+
+### 10.3 关键坑速查（真机踩过，别再踩）
+
+- **Repository.enqueue 死锁**：链内任务再调用其它 enqueue 方法会互相等待——已加重入检测
+  （`inChainJob` 时直接执行）。新增「维护类写」时注意。
+- **CardConfigAbility 复用实例**：UIAbility 复用时页面不重建，formId 要在 `onPageShow` 重读。
+- 卡片内不支持 `minFontScale/maxFontScale`、不支持滚动列表（上下滑）——需要"看全"就做一屏布局。
+- 命令行真机调试：`hdc -t <target>`（无线调试 target 是 IP:port）；`uitest dumpLayout` 拿几何、
+  `uitest uiInput click/longClick/swipe/inputText` 驱动；视觉模型看截图会被浅色线骗，判定对齐用 dump 几何。
