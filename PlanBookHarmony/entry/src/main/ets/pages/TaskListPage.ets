@@ -73,6 +73,8 @@ export struct TaskListPage {
           . fontSize(26)
           . fontColor([AppColors.onPrimary])
       }
+      . justifyContent(FlexAlign.Center)
+      . alignItems(HorizontalAlign.Center)
       . width(56)
       . height(56)
       . borderRadius(28)
@@ -124,6 +126,15 @@ export struct TaskListPage {
     . width('100%')
     . height('100%')
     . backgroundColor(AppColors.surface)
+    . gesture(PanGesture({ fingers: 1, direction: PanDirection.Horizontal })
+      . onActionEnd((e: GestureEvent) => {
+        // 左右划切换日期：右划昨天、左划明天
+        if (e.offsetX > 50) {
+          this.vm.selectDate(DateUtils.addDays(this.vm.selectedDate, -1));
+        } else if (e.offsetX < -50) {
+          this.vm.selectDate(DateUtils.addDays(this.vm.selectedDate, 1));
+        }
+      }))
   }
 
   private groupLabels(): string[] {

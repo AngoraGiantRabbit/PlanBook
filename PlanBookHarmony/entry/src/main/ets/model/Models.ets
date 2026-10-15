@@ -30,6 +30,9 @@ export class Notebook {
   isVisible: boolean = true;
   isActive: boolean = false;
   importSource: string | null = null; // 非 null = 导入子计划本（只读快照）
+  /** 课桌子本标记：课表定义存 timetableJson（课程/时间段结构化，可编辑重建） */
+  isTimetable: boolean = false;
+  timetableJson: string | null = null;
   createdAt: number = 0;
 
   get isMaster(): boolean {
@@ -49,6 +52,8 @@ export class Notebook {
     r.isVisible = n.isVisible;
     r.isActive = n.isActive;
     r.importSource = n.importSource;
+    r.isTimetable = n.isTimetable;
+    r.timetableJson = n.timetableJson;
     r.createdAt = n.createdAt;
     return r;
   }
@@ -174,5 +179,60 @@ export class TaskTypeLabels {
     const names = ['一', '二', '三', '四', '五', '六', '日'];
     const idx = day - 1;
     return idx >= 0 && idx < 7 ? names[idx] : '?';
+  }
+}
+
+/** 预置节次时间表（大学标准 10 节；图例见新建课表页） */
+export class PeriodTimes {
+  /** 第 n 节（1..10）→ [开始, 结束]（HH:mm）；越界回退第 1 节 */
+  static time(n: number): string[] {
+    const all: string[][] = [
+      ['08:00', '08:45'], ['08:55', '09:40'], ['10:20', '11:05'], ['11:15', '12:00'],
+      ['14:30', '15:15'], ['15:25', '16:10'], ['16:15', '17:00'], ['19:40', '20:25'],
+      ['20:35', '21:20'], ['21:30', '22:15']
+    ];
+    const i = n >= 1 && n <= 10 ? n - 1 : 0;
+    return all[i];
+  }
+
+  static count(): number {
+    return 10;
+  }
+
+  /** 第 n 节显示文本：如「第1节 08:00-08:45」 */
+  static label(n: number): string {
+    const t = PeriodTimes.time(n);
+    return `第${n}节 ${t[0]}-${t[1]}`;
+  }
+}
+
+/** 新建课表：课程的一个时间段（第 a-b 节 × 第 a-b 周 × 周几） */
+@ObservedV2
+export class SlotDraft {
+  @Trace dow: number = 1;            // ISO 周几 1..7
+  @Trace periodStart: number = 1;    // 起始节
+  @Trace periodEnd: number = 2;      // 结束节（含）
+  @Trace weekStart: number = 1;      // 起始教学周
+  @Trace weekEnd: number = 20;       // 结束教学周（含）
+
+  constructor(dow: number, periodStart: number, periodEnd: number, weekStart: number, weekEnd: number) {
+    this.dow = dow;
+    this.periodStart = periodStart;
+    this.periodEnd = periodEnd;
+    this.weekStart = weekStart;
+    this.weekEnd = weekEnd;
+  }
+}
+
+/** 新建课表：一门课程（多个时间段） */
+@ObservedV2
+export class CourseDraft {
+  @Trace name: string = '';
+  @Trace room: string = '';
+  @Trace teacher: string = '';
+  @Trace slots: SlotDraft[] = [];
+
+  constructor() {
+    this.slots.push(new SlotDraft(1, 1, 2, 1, 20));
   }
 }

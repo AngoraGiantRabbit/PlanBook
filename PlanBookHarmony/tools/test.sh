@@ -3,4 +3,4 @@
 # 用 DevEco 自带 Node 24 的原生 TS 类型剥离直接运行 .ets 源（无三方依赖）。
 set -e
 DEVECO="${DEVECO:-C:/Program Files/Huawei/DevEco Studio}"
-"$DEVECO/tools/node/node.exe" "$(dirname "$0")/run_ics_tests.mjs"
+"$DEVECO/tools/node/node.exe" "$(dirname "$0")/run_ics_tests.mjs && "$DEVECO/tools/node/node.exe" "$(dirname "$0")/run_ics_export_tests.mjs""

@@ -27,6 +27,8 @@ export class PlanBookVM {
   @Trace editing: Task | null = null;
   @Trace editingReadOnly: boolean = false;
   @Trace isLoading: boolean = false;
+  /** 教学周数（如"第6周"；学期第一周未配置为空） */
+  @Trace weekNo: string = '';
 
   private unsub: (() => void) | null = null;
   private ensureOnceDone: boolean = false;
@@ -86,6 +88,8 @@ export class PlanBookVM {
         }
         this.tasks = await Repository.loadExpandedTasks(
           master.id, visibleIds, DateUtils.weekDays(this.weekStart));
+        const weekNo = await Repository.termWeekNo(this.weekStart);
+        this.weekNo = weekNo === null ? '' : `第${weekNo}周`;
       } else {
         this.tasks = [];
       }
@@ -116,6 +120,11 @@ export class PlanBookVM {
   showAddTaskDialog(): void {
     this.showAddDialog = true;
     this.prefill = null;
+  }
+
+  /** 长按首页 chip：切换该子计划本的显示开关（只影响聚合显示，不动数据） */
+  toggleSubVisible(sub: Notebook): void {
+    Repository.setSubNotebookVisible(sub.id, !sub.isVisible).then(() => this.reload());
   }
 
   /** 点空白时段时调用：预填日期和时段，落到活动子计划本 */
@@ -543,6 +552,8 @@ export class ReviewEditVM {
 export class SettingsVM {
   @Trace master: Notebook | null = null;
   @Trace reviewSettings: ReviewSetting[] = [];
+  /** 学期第一周周一（yyyy-MM-dd；''=未配置） */
+  @Trace termStart: string = '';
 
   private unsub: (() => void) | null = null;
 
@@ -567,6 +578,7 @@ export class SettingsVM {
       if (master !== null) {
         this.reviewSettings = await Repository.getReviewSettingsOnce(master.id);
       }
+      this.termStart = (await Repository.getTermStart()) ?? '';
     } catch (e) {
       console.error(`SettingsVM.reload: ${e}`);
     }
@@ -589,6 +601,11 @@ export class SettingsVM {
         return;
       }
     }
+  }
+
+  /** 设置学期第一周（传任意日期，归一到所在周周一）；null 清除 */
+  setTermStart(date: string | null): void {
+    Repository.setTermStart(date === null ? null : DateUtils.weekStartOf(date)).then(() => this.reload());
   }
 }
 

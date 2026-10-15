@@ -1,8 +1,11 @@
 import { AppColors, ColorUtil } from '../common/Theme';
 import { Notebook, SubNotebookPalette } from '../model/Models';
 import { NotebookManagerVM } from '../viewmodel/ViewModels';
+import { IcsExporter } from '../data/IcsExporter';
+import { Repository } from '../data/Repository';
 import { DialogShell, TextButton } from '../components/Ui';
 import { router } from '@kit.ArkUI';
+import { common } from '@kit.AbilityKit';
 import { picker } from '@kit.CoreFileKit';
 import fs from '@ohos.file.fs';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -61,24 +64,32 @@ struct NotebookManagerPage {
           Column() {
             ForEach(this.vm.subs, (sub: Notebook) => {
               this.SubNotebookRow(sub)
-            }, (sub: Notebook) => `${sub.id}-${sub.name}-${sub.color}-${sub.isVisible}-${sub.isActive}-${this.vm.activeSubId}`)
+            }, (sub: Notebook) => `${sub.id}-${sub.name}-${sub.isVisible}-${sub.isActive}-${sub.isTimetable}-${this.vm.activeSubId}`)
           }
           . width('100%')
           . padding({ left: 16, right: 16 })
         }
         . scrollBar(BarState.Off)
         . layoutWeight(1)
+        . align(Alignment.TopStart)
 
-        Row({ space: 12 }) {
-          Button('新建子计划本')
+        Row({ space: 8 }) {
+          Button('新建子本')
             . layoutWeight(1)
+            . fontSize(13)
             . backgroundColor(AppColors.primary)
             . onClick(() => {
               this.createName = this.defaultSubName();
               this.showCreate = true;
             })
+          Button('新建课表')
+            . layoutWeight(1)
+            . fontSize(13)
+            . backgroundColor(AppColors.primary)
+            . onClick(() => router.pushUrl({ url: 'pages/CourseBuilderPage' }))
           Button('导入 ICS')
             . layoutWeight(1)
+            . fontSize(13)
             . backgroundColor(AppColors.surface)
             . fontColor(AppColors.primary)
             . border({ width: 1, color: AppColors.outline })
@@ -108,6 +119,19 @@ struct NotebookManagerPage {
       n++;
     }
     return `子计划本 ${n}`;
+  }
+
+  /** 导出该子计划本为 .ics（用户选保存位置） */
+  private exportIcs(sub: Notebook): void {
+    Repository.getTasksOfSubNotebook(sub.id).then((tasks) => {
+      const content = IcsExporter.buildContent(tasks, sub.name);
+      const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      IcsExporter.saveToFile(ctx, `${sub.name}.ics`, content).then((ok: boolean) => {
+        this.vm.importMessage = ok ? `已导出「${sub.name}」${tasks.length} 条日程` : '导出已取消';
+      }).catch((e: Error) => {
+        this.vm.importMessage = `导出失败：${e.message ?? e}`;
+      });
+    });
   }
 
   /** #11：DocumentViewPicker 选 .ics → 读文本（fd + UTF-8 解码）→ 建导入子计划本 */
@@ -179,6 +203,14 @@ struct NotebookManagerPage {
           . fontColor(AppColors.onSurface)
           . layoutWeight(1)
           . maxLines(1)
+        if (sub.isTimetable) {
+          Text('课表')
+            . fontSize(10)
+            . fontColor(AppColors.onPrimaryContainer)
+            . padding({ left: 4, right: 4, top: 2, bottom: 2 })
+            . borderRadius(4)
+            . backgroundColor(AppColors.primaryContainer)
+        }
         if (sub.isImported) {
           // #11：导入子计划本标识（只读快照，ADR-0005）
           Text('导入')
@@ -205,6 +237,20 @@ struct NotebookManagerPage {
         . width('100%')
 
       Row({ space: 2 }) {
+        SymbolGlyph($r('sys.symbol.share'))
+          . fontSize(20)
+          . fontColor([AppColors.onSurfaceVariant])
+          . padding(4)
+          . onClick(() => this.exportIcs(sub))
+        if (sub.isTimetable) {
+          SymbolGlyph($r('sys.symbol.calendar'))
+            . fontSize(20)
+            . fontColor([AppColors.primary])
+            . padding(4)
+            . onClick(() => {
+              router.pushUrl({ url: 'pages/CourseBuilderPage', params: { subId: sub.id } });
+            })
+        }
         SymbolGlyph($r('sys.symbol.paintpalette'))
           . fontSize(20)
           . fontColor([AppColors.onSurfaceVariant])
@@ -524,6 +570,7 @@ struct NotebookManagerPage {
         . width('100%')
       }
       . scrollBar(BarState.Off)
+      . align(Alignment.TopStart)
     }
   }
 }

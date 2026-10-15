@@ -40,6 +40,8 @@ export struct PlanBookPage {
           . fontSize(26)
           . fontColor([AppColors.onPrimary])
       }
+      . justifyContent(FlexAlign.Center)
+      . alignItems(HorizontalAlign.Center)
       . width(56)
       . height(56)
       . borderRadius(28)
@@ -81,6 +83,15 @@ export struct PlanBookPage {
     . width('100%')
     . height('100%')
     . backgroundColor(AppColors.surface)
+    . gesture(PanGesture({ fingers: 1, direction: PanDirection.Horizontal })
+      . onActionEnd((e: GestureEvent) => {
+        // 左右划翻周：右划上一周、左划下一周（与翻页手势同向）
+        if (e.offsetX > 50) {
+          this.vm.changeWeek(-1);
+        } else if (e.offsetX < -50) {
+          this.vm.changeWeek(1);
+        }
+      }))
   }
 
   @Builder
@@ -91,7 +102,7 @@ export struct PlanBookPage {
           . fontSize(20)
           . fontWeight(FontWeight.Bold)
           . fontColor(AppColors.onSurface)
-        Text(`${DateUtils.md(this.vm.weekStart)} - ${DateUtils.md(DateUtils.addDays(this.vm.weekStart, 6))}`)
+        Text(`${this.vm.weekNo.length > 0 ? this.vm.weekNo + ' · ' : ''}${DateUtils.md(this.vm.weekStart)} - ${DateUtils.md(DateUtils.addDays(this.vm.weekStart, 6))}`)
           . fontSize(11)
           . fontColor(AppColors.onSurfaceVariant)
       }
@@ -99,21 +110,25 @@ export struct PlanBookPage {
       . alignItems(HorizontalAlign.Start)
 
       SymbolGlyph($r('sys.symbol.chevron_left'))
-        . fontSize(24)
+        . fontSize(26)
         . fontColor([AppColors.onSurfaceVariant])
+        . padding({ left: 8, right: 4, top: 8, bottom: 8 })
         . onClick(() => this.vm.changeWeek(-1))
       Text('本周')
         . fontSize(14)
         . fontColor(AppColors.primary)
-        . padding({ left: 4, right: 4 })
+        . padding({ left: 8, right: 8, top: 8, bottom: 8 })
         . onClick(() => this.vm.goToThisWeek())
       SymbolGlyph($r('sys.symbol.chevron_right'))
-        . fontSize(24)
+        . fontSize(26)
         . fontColor([AppColors.onSurfaceVariant])
+        . padding({ left: 4, right: 4, top: 8, bottom: 8 })
         . onClick(() => this.vm.changeWeek(1))
+      // 刷新与翻周组拉开距离，避免误触
       SymbolGlyph($r('sys.symbol.arrow_clockwise'))
-        . fontSize(22)
+        . fontSize(24)
         . fontColor([this.vm.isLoading ? AppColors.primary : AppColors.onSurfaceVariant])
+        . padding({ left: 14, right: 4, top: 8, bottom: 8 })
         . onClick(() => {
           this.vm.refresh();
           // 同步刷新桌面卡片（Issue #13：手动刷新机制）
@@ -140,12 +155,16 @@ export struct PlanBookPage {
     . justifyContent(FlexAlign.Center)
   }
 
-  /** #9：子计划本 chips——显示中的子本各一枚（带颜色点），点按切换活动子本（写操作目标） */
+  /**
+   * #9：子计划本 chips——全部子本各一枚（带颜色点）：
+   * 点按 = 切换活动子本（写操作目标）；长按 = 切换显示开关。
+   * 隐藏的子本仍留在行内：半透明 + 删除线 + 虚线边框，长按恢复显示。
+   */
   @Builder
   SubNotebookChips() {
     Scroll() {
       Row({ space: 6 }) {
-        ForEach(this.visibleSubs(), (sub: Notebook) => {
+        ForEach(this.vm.subs, (sub: Notebook) => {
           Row({ space: 5 }) {
             Circle({ width: 9, height: 9 })
               . fill(ColorUtil.safe(sub.color))
@@ -153,15 +172,20 @@ export struct PlanBookPage {
               . fontSize(13)
               . fontColor(sub.id === this.activeSubId() ? AppColors.onPrimaryContainer : AppColors.onSurfaceVariant)
               . maxLines(1)
+              . decoration({ type: sub.isVisible ? TextDecorationType.None : TextDecorationType.LineThrough })
           }
           . padding({ left: 12, right: 12, top: 7, bottom: 7 })
           . borderRadius(10)
+          . opacity(sub.isVisible ? 1 : 0.45)
           . backgroundColor(sub.id === this.activeSubId() ? AppColors.primaryContainer : '#00000000')
           . border({
             width: 1,
-            color: sub.id === this.activeSubId() ? AppColors.primaryContainer : AppColors.outline
+            color: sub.id === this.activeSubId() ? AppColors.primaryContainer : AppColors.outline,
+            style: sub.isVisible ? BorderStyle.Solid : BorderStyle.Dashed
           })
           . onClick(() => this.vm.switchActiveSub(sub))
+          . gesture(LongPressGesture({ repeat: false, duration: 350 })
+            . onAction((_e: GestureEvent) => this.vm.toggleSubVisible(sub)))
         }, (sub: Notebook) => `${sub.id}-${sub.name}-${sub.isVisible}-${sub.isActive}`)
       }
       . padding({ left: 8, right: 8, top: 2, bottom: 2 })
@@ -169,16 +193,6 @@ export struct PlanBookPage {
     . scrollable(ScrollDirection.Horizontal)
     . scrollBar(BarState.Off)
     . width('100%')
-  }
-
-  private visibleSubs(): Notebook[] {
-    const out: Notebook[] = [];
-    for (const s of this.vm.subs) {
-      if (s.isVisible) {
-        out.push(s);
-      }
-    }
-    return out;
   }
 
   private activeSubId(): number {
@@ -208,7 +222,7 @@ export struct PlanBookPage {
       this.LongTermArea()
     }
     . width('100%')
-    . height('100%')
+    . layoutWeight(1)
   }
 
   @Builder
@@ -249,11 +263,15 @@ export struct PlanBookPage {
   TimeAxis() {
     Column() {
       ForEach(this.hourLabels(), (label: string) => {
-        Text(label)
-          . fontSize(10)
-          . fontColor(AppColors.onSurfaceVariant)
-          . height(Dimens.hourHeight)
-          . width(40)
+        Column() {
+          Text(label)
+            . fontSize(10)
+            . lineHeight(11)
+            . fontColor(AppColors.onSurfaceVariant)
+        }
+        . justifyContent(FlexAlign.Start)
+        . height(Dimens.hourHeight)
+        . width(40)
       }, (label: string) => label)
     }
     . width(40)
@@ -327,31 +345,37 @@ export struct PlanBookPage {
     . clip(true)
   }
 
-  /** 单个任务块：按 startTime/endTime 精确放置；重叠任务横向并列 */
+  /** 单个任务块：按 startTime/endTime 精确放置；重叠任务横向并列；分立圆角 */
   @Builder
   TaskBlock(task: Task) {
-    Column({ space: 1 }) {
-      Text(task.title)
-        . fontSize(10)
-        . fontColor(AppColors.onSurface)
-        . maxLines(1)
-        . textOverflow({ overflow: TextOverflow.Ellipsis })
-        . decoration({ type: task.isCompleted ? TextDecorationType.LineThrough : TextDecorationType.None })
-      if (task.location !== null && task.location.length > 0) {
-        Text(task.location)
+    Column() {
+      Column({ space: 1 }) {
+        Text(task.title)
           . fontSize(10)
-          . fontColor(AppColors.onSurfaceVariant)
+          . fontColor(AppColors.onSurface)
           . maxLines(1)
           . textOverflow({ overflow: TextOverflow.Ellipsis })
+          . decoration({ type: task.isCompleted ? TextDecorationType.LineThrough : TextDecorationType.None })
+        if (task.location !== null && task.location.length > 0) {
+          Text(task.location)
+            . fontSize(10)
+            . fontColor(AppColors.onSurfaceVariant)
+            . maxLines(1)
+            . textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
       }
+      . width('100%')
+      . height('100%')
+      . padding(2)
+      . clip(true)
+      . borderRadius(6)
+      . backgroundColor(this.blockColor(task))
+      . onClick(() => this.onTaskClick(task))
     }
     . width(`${100 / this.overlappingOf(task).length}%`)
     . height(this.blockHeightVp(task))
     . position({ x: this.blockXPct(task), y: this.blockYVp(task) })
-    . padding(2)
-    . clip(true)
-    . backgroundColor(this.blockColor(task))
-    . onClick(() => this.onTaskClick(task))
+    . padding(1)
   }
 
   private blockXPct(task: Task): string {

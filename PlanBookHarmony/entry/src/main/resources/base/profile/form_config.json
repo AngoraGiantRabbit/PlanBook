@@ -1,22 +1,57 @@
 {
   "forms": [
     {
-      "name": "PlanBookCard",
-      "displayName": "计划本周视图",
-      "description": "一周日程网格 + 今日待办（只读，在 App 内点刷新同步）",
-      "src": "./ets/widget/PlanBookCard.ets",
+      "name": "PlanBookTodoCard",
+      "displayName": "计划本·今日待办",
+      "description": "今天的待办清单（灵活/长期任务），行首按子计划本着色；可多开，每张可单独配置显示哪些子计划本",
+      "src": "./ets/widget/TodoCard.ets",
+      "uiSyntax": "arkts",
+      "window": {
+        "designWidth": 300
+      },
+      "formConfigAbility": "ability://CardConfigAbility",
+      "isDefault": false,
+      "updateEnabled": false,
+      "defaultDimension": "2*2",
+      "supportDimensions": [
+        "1*2",
+        "2*2"
+      ]
+    },
+    {
+      "name": "PlanBookWeekCard",
+      "displayName": "计划本·周课表",
+      "description": "一周课表网格 + 卡内翻周/刷新；可多开，每张可单独配置显示哪些子计划本",
+      "src": "./ets/widget/WeekCard.ets",
       "uiSyntax": "arkts",
       "window": {
         "designWidth": 720
       },
+      "formConfigAbility": "ability://CardConfigAbility",
       "isDefault": true,
-      "scheduledUpdateTime": "06:30",
       "updateEnabled": false,
       "defaultDimension": "2*4",
       "supportDimensions": [
         "2*4"
-      ],
-      "formVisibleNotify": false
+      ]
+    },
+    {
+      "name": "PlanBookLargeCard",
+      "displayName": "计划本·整页周课表",
+      "description": "整页一周课表 + 今日待办条 + 卡内翻周/刷新；可多开，每张可单独配置显示哪些子计划本",
+      "src": "./ets/widget/LargeCard.ets",
+      "uiSyntax": "arkts",
+      "window": {
+        "designWidth": 960
+      },
+      "formConfigAbility": "ability://CardConfigAbility",
+      "isDefault": false,
+      "updateEnabled": false,
+      "defaultDimension": "6*4",
+      "supportDimensions": [
+        "4*4",
+        "6*4"
+      ]
     }
   ]
 }

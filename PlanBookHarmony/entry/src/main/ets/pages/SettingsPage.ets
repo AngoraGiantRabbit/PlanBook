@@ -1,7 +1,8 @@
 import { AppColors } from '../common/Theme';
 import { ReviewSetting, ReviewType, TaskTypeLabels } from '../model/Models';
 import { SettingsVM } from '../viewmodel/ViewModels';
-import { TimePickerOverlay } from '../components/Pickers';
+import { DatePickerOverlay, TimePickerOverlay } from '../components/Pickers';
+import { DateUtils } from '../common/DateUtils';
 import { parseTime } from '../components/Pickers';
 import { router } from '@kit.ArkUI';
 
@@ -31,6 +32,8 @@ export struct SettingsPage {
     return null;
   }
 
+  @Local showTermPicker: boolean = false;
+
   build() {
     Stack() {
       Scroll() {
@@ -51,6 +54,41 @@ export struct SettingsPage {
 
           Blank()
             . height(20)
+          Text('学期')
+            . fontSize(16)
+            . fontWeight(FontWeight.Bold)
+            . fontColor(AppColors.onSurface)
+            . width('100%')
+          Text('配置学期第一周的周一后，周视图标题与桌面卡片会显示教学周数（第 N 周）。')
+            . fontSize(12)
+            . fontColor(AppColors.onSurfaceVariant)
+            . width('100%')
+          Row({ space: 12 }) {
+            Text(this.vm.termStart.length > 0 ? `第一周：${this.vm.termStart} 起` : '未设置')
+              . fontSize(14)
+              . fontColor(this.vm.termStart.length > 0 ? AppColors.onSurface : AppColors.onSurfaceVariant)
+              . layoutWeight(1)
+            Text('选择')
+              . fontSize(13)
+              . fontColor(AppColors.primary)
+              . padding({ left: 10, right: 10, top: 6, bottom: 6 })
+              . borderRadius(10)
+              . border({ width: 1, color: AppColors.outline })
+              . onClick(() => this.showTermPicker = true)
+            if (this.vm.termStart.length > 0) {
+              Text('清除')
+                . fontSize(13)
+                . fontColor(AppColors.error)
+                . padding({ left: 10, right: 10, top: 6, bottom: 6 })
+                . borderRadius(10)
+                . border({ width: 1, color: AppColors.outline })
+                . onClick(() => this.vm.setTermStart(null))
+            }
+          }
+          . width('100%')
+
+          Blank()
+            . height(20)
           Text('计划本')
             . fontSize(16)
             . fontWeight(FontWeight.Bold)
@@ -67,10 +105,18 @@ export struct SettingsPage {
         . padding(16)
         . alignItems(HorizontalAlign.Start)
       }
-      . scrollBar(BarState.Off)
-      . width('100%')
-      . height('100%')
       . align(Alignment.TopStart)
+
+      if (this.showTermPicker) {
+        DatePickerOverlay({
+          initialDate: this.vm.termStart.length > 0 ? this.vm.termStart : DateUtils.today(),
+          onConfirm: (d: string) => {
+            this.vm.setTermStart(d);
+            this.showTermPicker = false;
+          },
+          onDismiss: () => this.showTermPicker = false
+        })
+      }
 
       if (this.pickerFor !== null) {
         this.TimePickOverlay()

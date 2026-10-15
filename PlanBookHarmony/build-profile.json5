@@ -1,11 +1,26 @@
 {
   "app": {
-    "signingConfigs": [],
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "C:\\Users\\XXL04\\.ohos\\config\\default_PlanBookHarmony_sPYAM2uFgYi3dkwwHrPTP_XTadUsndOqNTsKTmUw4CU=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001BA0F071B70CA4DA0C6552115D9289D45AD8C2CAA0A62274C5A745DD0D5165A09D2742603A2E43E8",
+          "profile": "C:\\Users\\XXL04\\.ohos\\config\\default_PlanBookHarmony_sPYAM2uFgYi3dkwwHrPTP_XTadUsndOqNTsKTmUw4CU=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:\\Users\\XXL04\\.ohos\\config\\default_PlanBookHarmony_sPYAM2uFgYi3dkwwHrPTP_XTadUsndOqNTsKTmUw4CU=.p12",
+          "storePassword": "0000001BA0185C0FEF423057B6986CC9EBACA8BF5935574940F0EF6BD9679DBB0BD3B09A389892A35F244F"
+        }
+      }
+    ],
     "products": [
       {
         "name": "default",
+        "signingConfig": "default",
         "compatibleSdkVersion": "26.0.0",
-        "compatibleSdkVersionStage": "release",
+        "targetSdkVersion": "26.0.0",
         "runtimeOS": "HarmonyOS",
         "buildOption": {
           "strictMode": {
@@ -16,8 +31,12 @@
       }
     ],
     "buildModeSet": [
-      { "name": "debug" },
-      { "name": "release" }
+      {
+        "name": "debug"
+      },
+      {
+        "name": "release"
+      }
     ]
   },
   "modules": [
@@ -27,7 +46,9 @@
       "targets": [
         {
           "name": "default",
-          "applyToProducts": [ "default" ]
+          "applyToProducts": [
+            "default"
+          ]
         }
       ]
     }

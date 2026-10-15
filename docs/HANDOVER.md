@@ -186,3 +186,13 @@ Repository.observeExpandedTasks(masterId, subIds, days)   ← 唯一展开/完�
 - 架构映射：Room Flow → Repository 写后通知总线；Compose → 状态管理 V2（@ObservedV2 VM）；
   Glance → FormExtensionAbility + ArkTS 卡片；细节见 `PlanBookHarmony/README.md`
 - 已知差异：浅色固定主题（无深色模式）；DB 为全新 schema v6 起步（无迁移链，两版数据不互通）
+
+### 10.1 卡片子系统（2026-10 第二版：多开/独立配置/卡内翻周/自动同步）
+
+- 三张 ArkTS 卡片：今日待办（1x2/2x2）、周课表（2x4）、整页周课表（4x4）；
+  同卡可多开，每张经设置角标（`ability://CardConfigAbility`）独立勾选显示哪些子计划本
+  （`card_prefs` 表：formId → notebookIds/weekOffset）。
+- 卡内 `< >` 翻周 / `↻` 刷新走 postCardAction message → `onFormMessage`，翻周状态按 formId 持久化。
+- App 写操作后 2s 节流自动推送全部卡片（`WidgetSync.installAutoSync`）；App 内刷新按钮仍保留（惰性维护）。
+- 教学周数：`app_settings.termStart`（设置页配置，归一到周一），周视图标题与卡片显示「第 N 周」。
+- 首页长按子计划本 chip = 切显示开关。细节见 `PlanBookHarmony/README.md`。
