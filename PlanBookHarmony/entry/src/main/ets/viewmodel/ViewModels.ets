@@ -458,13 +458,14 @@ export class ReviewEditVM {
     }
   }
 
-  /** 打开某日复盘编辑：任务列表走观察管道自动跟随，这里加载复盘文本与活动子本 */
-  openReviewEdit(date: string): void {
+  /** 打开某日复盘编辑：任务列表走观察管道自动跟随，这里加载复盘文本与活动子本。
+   *  返回的 Promise 完成时 content 已就绪，页面据此回填输入框。 */
+  openReviewEdit(date: string): Promise<void> {
     this.date = date;
     this.loaded = false;
     this.editDate = date;
     this.reloadTasks();
-    Repository.getMasterNotebookOnce().then(async (master) => {
+    return Repository.getMasterNotebookOnce().then(async (master) => {
       if (master === null) {
         return;
       }

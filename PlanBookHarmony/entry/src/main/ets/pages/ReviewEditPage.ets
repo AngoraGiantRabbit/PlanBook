@@ -18,7 +18,8 @@ struct ReviewEditPage {
   date: string = DateUtils.today();
   @Local text: string = '';
   private saveTimer: number = -1;
-  /** 拆分中的长期任务 + 拆分类型弹层状态 */
+  /** 用户是否已手动输入（加载回填不覆盖用户输入） */
+  private userEdited: boolean = false;
   @Local splitTask: Task | null = null;
   @Local splitTypePick: boolean = false;
   @Local splitType: TaskType | null = null;
@@ -29,18 +30,27 @@ struct ReviewEditPage {
       this.date = params['date'] as string;
     }
     this.vm.attach();
-    this.vm.openReviewEdit(this.date);
+    this.vm.openReviewEdit(this.date).then(() => {
+      // 加载完成后回填已存复盘文本；用户已开始输入则不覆盖（避免异步竞态吞字）
+      if (!this.userEdited) {
+        this.text = this.vm.content;
+      }
+    });
   }
 
   aboutToDisappear(): void {
     this.vm.detach();
+    // 退出时若还有 1 秒防抖内的未保存输入，立即落库而不是丢弃
     if (this.saveTimer >= 0) {
       clearTimeout(this.saveTimer);
+      this.saveTimer = -1;
+      this.vm.saveReviewContent(this.text);
     }
   }
 
   private onTextChanged(v: string): void {
     this.text = v;
+    this.userEdited = true;
     // 停止输入 1 秒后自动保存（PRD 4.4.4）
     if (this.saveTimer >= 0) {
       clearTimeout(this.saveTimer);
