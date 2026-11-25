@@ -106,7 +106,6 @@ export struct TaskListPage {
         TaskEditSheet({
           notebookId: this.vm.editing.notebookId,
           existing: this.vm.editing,
-          readOnly: this.vm.editingReadOnly,
           onDismiss: () => this.vm.closeTaskEditor(),
           onConfirm: (t: Task) => this.vm.saveEditedTask(t),
           onDelete: () => {

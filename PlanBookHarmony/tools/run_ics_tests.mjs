@@ -13,10 +13,12 @@ mkdirSync(outDir, { recursive: true });
 
 const du = readFileSync(resolve(root, 'entry/src/main/ets/common/DateUtils.ets'), 'utf8');
 writeFileSync(resolve(outDir, 'DateUtils.ts'), du);
-const ip = readFileSync(resolve(root, 'entry/src/main/ets/data/IcsParser.ets'), 'utf8');
-writeFileSync(resolve(outDir, 'IcsParser.ts'), ip.replace(
-  "import { DateUtils } from '../common/DateUtils';",
-  "import { DateUtils } from './DateUtils.ts';"));
+const ci = readFileSync(resolve(root, 'entry/src/main/ets/common/CourseInfo.ets'), 'utf8');
+writeFileSync(resolve(outDir, 'CourseInfo.ts'), ci);
+const ip = readFileSync(resolve(root, 'entry/src/main/ets/data/IcsParser.ets'), 'utf8')
+  .replace("import { DateUtils } from '../common/DateUtils';", "import { DateUtils } from './DateUtils.ts';")
+  .replace("import { CourseInfo } from '../common/CourseInfo';", "import { CourseInfo } from './CourseInfo.ts';");
+writeFileSync(resolve(outDir, 'IcsParser.ts'), ip);
 
 const { IcsParser } = await import(pathToFileURL(resolve(outDir, 'IcsParser.ts')).href);
 

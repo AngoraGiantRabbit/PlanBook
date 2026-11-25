@@ -39,15 +39,21 @@ export class CardDataBuilder {
       }
       const selectedIds: number[] = [];
       const colorMap: Record<string, string> = {};
+      const timetableIds: Set<number> = new Set<number>();
       const selectedNames: string[] = [];
       for (const s of selected) {
         selectedIds.push(s.id);
         selectedNames.push(s.name);
+        if (s.isTimetable) {
+          timetableIds.add(s.id);
+        }
         const c = s.color;
         if (c !== null && ColorUtil.isHex(c)) {
           colorMap[`${s.id}`] = c;
         }
       }
+      // 课程颜色：按课表（课表id → 课程名 → 颜色），未设置的课回退课表色
+      const courseColors = await Repository.getAllCourseColors();
       const today = DateUtils.today();
       const weekOffset = formId.length > 0 ? await Repository.getCardWeekOffset(formId) : 0;
       const weekStart = DateUtils.addWeeks(DateUtils.weekStartOf(today), weekOffset);
@@ -89,7 +95,16 @@ export class CardDataBuilder {
           });
         const shown = dayTimed.length > 10 ? dayTimed.slice(0, 10) : dayTimed;
         for (const t of shown) {
-          const color = colorMap[`${t.notebookId}`];
+          let color = colorMap[`${t.notebookId}`];
+          if (timetableIds.has(t.notebookId)) {
+            const inner = courseColors.get(`${t.notebookId}`);
+            if (inner !== undefined) {
+              const cc = inner.get(t.title);
+              if (cc !== undefined) {
+                color = cc;
+              }
+            }
+          }
           const st = t.startTime ?? '00:00';
           const et = t.endTime ?? t.startTime ?? '00:00';
           const sm = Repository.hmsToMinutes(st);

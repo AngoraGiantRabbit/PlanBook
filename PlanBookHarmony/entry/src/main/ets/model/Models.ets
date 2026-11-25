@@ -59,17 +59,19 @@ export class Notebook {
   }
 }
 
-/** 子计划本调色板：新建时按子计划本序号轮转分配（ADR-0004） */
+/** 子计划本/课表/课程颜色共用的预留色板（用户指定 10 色；重复色 b2e6d9 去重） */
 export class SubNotebookPalette {
   private static readonly colors: string[] = [
-    '#7986CB', // 蓝
-    '#81C784', // 绿
-    '#FFB74D', // 橙
-    '#E57373', // 红
-    '#BA68C8', // 紫
-    '#4DD0E1', // 青
-    '#A1887F', // 棕
-    '#90A4AE'  // 灰蓝
+    '#B2E6D9', // 薄荷
+    '#EF7899', // 桃红
+    '#C8E5DB', // 浅青灰
+    '#C8B7A6', // 暖灰
+    '#70808B', // 蓝灰
+    '#EACC9B', // 杏黄
+    '#758D71', // 橄榄绿
+    '#B5D3F8', // 雾蓝
+    '#F8B6C8', // 樱粉
+    '#C4A5DE'  // 淡紫
   ];
 
   static all(): string[] {
@@ -234,5 +236,64 @@ export class CourseDraft {
 
   constructor() {
     this.slots.push(new SlotDraft(1, 1, 2, 1, 20));
+  }
+}
+
+/** 课程的一次节次（编辑课程时的行项）：id>0 = 已持久化任务，id=0 = 新增 */
+@ObservedV2
+export class CourseOccDraft {
+  @Trace id: number = 0;
+  @Trace date: string = '';
+  @Trace start: string = '';
+  @Trace end: string = '';
+
+  constructor(id: number, date: string, start: string, end: string) {
+    this.id = id;
+    this.date = date;
+    this.start = start;
+    this.end = end;
+  }
+}
+
+/** 课表节次配置（每课表独立，可编辑）：count 节数 + 每节起止时间 */
+@ObservedV2
+export class PeriodConfig {
+  @Trace count: number = PeriodTimes.count();
+  /** 第 i+1 节的 [开始, 结束]（HH:mm） */
+  @Trace times: string[][] = [];
+
+  static default(): PeriodConfig {
+    const c = new PeriodConfig();
+    c.count = PeriodTimes.count();
+    c.times = [];
+    for (let n = 1; n <= c.count; n++) {
+      const t = PeriodTimes.time(n);
+      c.times.push([t[0], t[1]]);
+    }
+    return c;
+  }
+
+  /** 第 n 节（1..count）的 [开始, 结束]；越界回退最后一节 */
+  time(n: number): string[] {
+    const i = n >= 1 && n <= this.times.length ? n - 1 : this.times.length - 1;
+    return i < 0 ? ['08:00', '08:45'] : this.times[i];
+  }
+
+  label(n: number): string {
+    const t = this.time(n);
+    return `第${n}节 ${t[0]}-${t[1]}`;
+  }
+
+  /** 调整节数：增节复制默认时间，减节截断 */
+  resize(count: number): void {
+    const c = Math.max(1, Math.min(20, count));
+    while (this.times.length < c) {
+      const t = PeriodTimes.time(this.times.length + 1);
+      this.times.push([t[0], t[1]]);
+    }
+    while (this.times.length > c) {
+      this.times.pop();
+    }
+    this.count = c;
   }
 }

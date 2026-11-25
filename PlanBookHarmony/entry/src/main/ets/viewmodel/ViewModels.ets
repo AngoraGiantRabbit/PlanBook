@@ -1,8 +1,9 @@
 import { Repository } from '../data/Repository';
 import { IcsParser } from '../data/IcsParser';
+import { CourseInfo } from '../common/CourseInfo';
 import { DateUtils } from '../common/DateUtils';
 import {
-  Notebook, Review, ReviewSetting, ReviewType, SubNotebookPalette, Task, TaskType
+  CourseOccDraft, Notebook, Review, ReviewSetting, ReviewType, SubNotebookPalette, Task, TaskType
 } from '../model/Models';
 
 /**
@@ -25,10 +26,15 @@ export class PlanBookVM {
   @Trace showAddDialog: boolean = false;
   @Trace prefill: Task | null = null;
   @Trace editing: Task | null = null;
-  @Trace editingReadOnly: boolean = false;
-  @Trace isLoading: boolean = false;
-  /** 教学周数（如"第6周"；学期第一周未配置为空） */
+  /** 课程编辑（课表子本的任务以课程形态编辑，见 CourseEditSheet） */
+  @Trace showAddCourse: boolean = false;
+  @Trace coursePrefill: Task | null = null;
+  @Trace editingCourse: Task | null = null;
+  @Trace courseReadOnly: boolean = false;
+  /** 课程颜色（按课表：课表id → 课程名 → 颜色；未设置的课回退课表色） */
+  @Trace courseColors: Map<string, Map<string, string>> = new Map<string, Map<string, string>>();
   @Trace weekNo: string = '';
+  @Trace isLoading: boolean = false;
 
   private unsub: (() => void) | null = null;
   private ensureOnceDone: boolean = false;
@@ -79,6 +85,7 @@ export class PlanBookVM {
       this.master = master;
       this.subs = subs;
       this.activeSub = active;
+      this.courseColors = await Repository.getAllCourseColors();
       if (master !== null) {
         const visibleIds: number[] = [];
         for (const s of subs) {
@@ -141,6 +148,84 @@ export class PlanBookVM {
     this.prefill = prefill;
   }
 
+  // ---------- 课程（课表子本专用写路径） ----------
+
+  /** 加号 / 空白时段统一入口：活动子本是课表 → 新建课程；否则新建任务 */
+  openAdd(): void {
+    if (this.activeIsTimetable()) {
+      this.openAddCourse();
+    } else {
+      this.showAddTaskDialog();
+    }
+  }
+
+  openAddAt(date: string, startHour: number): void {
+    if (this.activeIsTimetable()) {
+      this.openAddCourseWithPrefill(date,
+        `${startHour}`.padStart(2, '0') + ':00', `${startHour + 1}`.padStart(2, '0') + ':00');
+    } else {
+      this.showAddTaskDialogWithPrefill(date, startHour);
+    }
+  }
+
+  private activeIsTimetable(): boolean {
+    return this.activeSub !== null && this.activeSub.isTimetable;
+  }
+
+  private subOf(notebookId: number): Notebook | null {
+    for (const s of this.subs) {
+      if (s.id === notebookId) {
+        return s;
+      }
+    }
+    return null;
+  }
+
+  private openAddCourseWithPrefill(date: string, startTime: string, endTime: string): void {
+    const prefill = new Task();
+    prefill.notebookId = this.activeSub === null ? 0 : this.activeSub.id;
+    prefill.title = '';
+    prefill.type = TaskType.ONE_OFF;
+    prefill.startDate = date;
+    prefill.endDate = date;
+    prefill.startTime = startTime;
+    prefill.endTime = endTime;
+    this.showAddCourse = true;
+    this.coursePrefill = prefill;
+  }
+
+  openAddCourse(): void {
+    this.openAddCourseWithPrefill(this.selectedDate, '', '');
+  }
+
+  hideAddCourseDialog(): void {
+    this.showAddCourse = false;
+    this.coursePrefill = null;
+  }
+
+  /** 保存整门课（写路径在 Repository.saveCourse）：oldTitle 为空 = 新建 */
+  saveCourse(notebookId: number, oldTitle: string, name: string, room: string,
+    teacher: string, occs: CourseOccDraft[]): void {
+    Repository.saveCourse(notebookId, oldTitle, name, room, teacher, occs).then(() => {
+      this.showAddCourse = false;
+      this.coursePrefill = null;
+      this.editingCourse = null;
+      this.reload();
+    }).catch((e: Error) => console.error(`saveCourse: ${e}`));
+  }
+
+  /** 删除整门课：该课表内同名全部节次一并删除 */
+  deleteCourse(representative: Task): void {
+    Repository.deleteCourse(representative.notebookId, representative.title).then(() => {
+      this.editingCourse = null;
+      this.reload();
+    });
+  }
+
+  closeCourseEditor(): void {
+    this.editingCourse = null;
+  }
+
   hideAddTaskDialog(): void {
     this.showAddDialog = false;
     this.prefill = null;
@@ -199,20 +284,18 @@ export class PlanBookVM {
     Repository.toggleTaskComplete(task, task.startDate).then(() => this.reload());
   }
 
-  /** 点击任务：加载原始任务（避免展开后的单日 copy 覆盖原始区间），打开编辑器。
-   *  #12：任务属于导入子计划本时标记只读（快照语义，禁编辑/删除，勾选完成不受限）。 */
+  /** 点击任务/课程：课表子本的任务 → 课程编辑器（课表未设为活动时只读）；
+   *  普通任务 → 任务编辑器（加载原始任务，避免展开 copy 覆盖原始区间）。 */
   openTaskEditor(task: Task): void {
     Repository.getTaskById(task.id).then((original) => {
       const resolved = original ?? task;
-      let readOnly = false;
-      for (const s of this.subs) {
-        if (s.id === resolved.notebookId && s.isImported) {
-          readOnly = true;
-          break;
-        }
+      const sub = this.subOf(resolved.notebookId);
+      if (sub !== null && sub.isTimetable) {
+        this.editingCourse = resolved;
+        this.courseReadOnly = this.activeSub === null || this.activeSub.id !== sub.id;
+      } else {
+        this.editing = resolved;
       }
-      this.editing = resolved;
-      this.editingReadOnly = readOnly;
     });
   }
 
@@ -255,7 +338,6 @@ export class TaskListVM {
   @Trace showAddDialog: boolean = false;
   @Trace prefill: Task | null = null;
   @Trace editing: Task | null = null;
-  @Trace editingReadOnly: boolean = false;
 
   private unsub: (() => void) | null = null;
   private ensureOnceDone: boolean = false;
@@ -298,9 +380,10 @@ export class TaskListVM {
       this.subs = subs;
       this.activeSub = active;
       if (master !== null) {
+        // 课程（课表子本）不是任务：待办列表只聚合普通子计划本
         const visibleIds: number[] = [];
         for (const s of subs) {
-          if (s.isVisible) {
+          if (s.isVisible && !s.isTimetable) {
             visibleIds.push(s.id);
           }
         }
@@ -329,10 +412,20 @@ export class TaskListVM {
     Repository.toggleTaskComplete(task, this.selectedDate).then(() => this.reload());
   }
 
-  /** 点加号：预填选中日期，落到活动子计划本 */
+  /** 点加号：预填选中日期，落到活动子计划本（活动的是课表时落到第一个普通子本——课程不进待办列表） */
   openAddDialog(): void {
+    let target: Notebook | null = this.activeSub;
+    if (target !== null && target.isTimetable) {
+      target = null;
+      for (const s of this.subs) {
+        if (!s.isTimetable && s.isVisible) {
+          target = s;
+          break;
+        }
+      }
+    }
     const prefill = new Task();
-    prefill.notebookId = this.activeSub === null ? 0 : this.activeSub.id;
+    prefill.notebookId = target === null ? (this.master !== null ? this.master.id : 0) : target.id;
     prefill.title = '';
     prefill.type = TaskType.ONE_OFF;
     prefill.startDate = this.selectedDate;
@@ -354,19 +447,10 @@ export class TaskListVM {
     });
   }
 
-  /** 条目点击：加载原始任务，打开编辑器 */
+  /** 条目点击：加载原始任务，打开编辑器（课程不进待办列表，这里只会是普通任务） */
   openTaskEditor(task: Task): void {
     Repository.getTaskById(task.id).then((original) => {
-      const resolved = original ?? task;
-      let readOnly = false;
-      for (const s of this.subs) {
-        if (s.id === resolved.notebookId && s.isImported) {
-          readOnly = true;
-          break;
-        }
-      }
-      this.editing = resolved;
-      this.editingReadOnly = readOnly;
+      this.editing = original ?? task;
     });
   }
 
@@ -670,9 +754,22 @@ export class NotebookManagerVM {
     Repository.renameNotebook(updated).then(() => this.reload());
   }
 
-  /** 删除子计划本：至少保留一个（删活动子本时仓库会自动换活动） */
+  /** 删除子计划本/课表：普通子本至少保留一个；课表可删（删活动本时仓库会自动换活动） */
+  canDelete(notebook: Notebook): boolean {
+    if (notebook.isTimetable) {
+      return true;
+    }
+    let normalCount = 0;
+    for (const s of this.subs) {
+      if (!s.isTimetable) {
+        normalCount++;
+      }
+    }
+    return normalCount > 1;
+  }
+
   deleteSubNotebook(notebook: Notebook): void {
-    if (this.subs.length <= 1) {
+    if (!this.canDelete(notebook)) {
       return;
     }
     Repository.deleteNotebook(notebook).then(() => this.reload());
@@ -694,10 +791,10 @@ export class NotebookManagerVM {
   }
 
   /**
-   * #11/#12：导入 ICS——解析 + 建导入子计划本（只读快照，默认显示、不抢活动）。
-   * 同名旧导入子本整本替换重建（完成态丢弃）。失败只更新提示文案，事务回滚无半成品。
+   * #11/#12：导入 ICS——解析 + 建导入子本（方式可选：课表 / 普通子计划本）。
+   * 同名旧导入子本整本替换重建（按本次选择的类型重建）；失败只更新提示文案，事务回滚无半成品。
    */
-  importIcs(sourceName: string, content: string): void {
+  importIcs(sourceName: string, content: string, asTimetable: boolean): void {
     try {
       const tasks = IcsParser.parse(content);
       if (tasks.length === 0) {
@@ -709,10 +806,11 @@ export class NotebookManagerVM {
           this.importMessage = '导入失败：主计划本不存在';
           return;
         }
-        Repository.importIcsSubNotebook(master.id, sourceName, tasks).then((result) => {
+        Repository.importIcsSubNotebook(master.id, sourceName, tasks, asTimetable).then((result) => {
+          const kind = asTimetable ? '课表' : '子计划本';
           this.importMessage = result.replacedOld
-            ? `已重新导入「${sourceName}」：整本替换为 ${tasks.length} 条课程（旧完成态已丢弃）`
-            : `已导入「${sourceName}」：${tasks.length} 条课程`;
+            ? `已重新导入「${sourceName}」：作为${kind}整本替换为 ${tasks.length} 条课程`
+            : `已导入「${sourceName}」：${tasks.length} 条课程（作为${kind}）`;
         }).catch((e: Error) => {
           console.error(`ICS import failed: ${e}`);
           this.importMessage = `导入失败：${e}`;
@@ -726,5 +824,68 @@ export class NotebookManagerVM {
 
   clearImportMessage(): void {
     this.importMessage = null;
+  }
+}
+
+/** 现有课程页 VM（管理页「现有课程」入口，按课表）：该课表的课程 + 每课颜色 */
+@ObservedV2
+export class CourseColorsVM {
+  @Trace notebook: Notebook | null = null;
+  @Trace courses: string[] = [];
+  @Trace colors: Map<string, string> = new Map<string, string>();
+
+  private subId: number = 0;
+  private unsub: (() => void) | null = null;
+
+  attach(subId: number): void {
+    this.subId = subId;
+    this.unsub = Repository.subscribe(() => {
+      this.reload();
+    });
+    this.reload();
+  }
+
+  detach(): void {
+    if (this.unsub !== null) {
+      this.unsub();
+      this.unsub = null;
+    }
+  }
+
+  async reload(): Promise<void> {
+    if (this.subId <= 0) {
+      return;
+    }
+    try {
+      this.notebook = await Repository.getNotebookById(this.subId);
+      this.courses = await Repository.getCourseTitles(this.subId);
+      this.colors = await Repository.getCourseColors(this.subId);
+    } catch (e) {
+      console.error(`CourseColorsVM.reload: ${e}`);
+    }
+  }
+
+  /** 某课的颜色；未设置返回 null（渲染回退课表色） */
+  colorOf(title: string): string | null {
+    const v = this.colors.get(title);
+    return v === undefined ? null : v;
+  }
+
+  /** 回退色：所在课表的颜色 */
+  fallbackColor(): string {
+    return this.notebook === null || this.notebook.color === null ? '#9E9E9E' : this.notebook.color;
+  }
+
+  setColor(title: string, color: string): void {
+    Repository.setCourseColor(this.subId, title, color).then(() => this.reload());
+  }
+
+  clearColor(title: string): void {
+    Repository.setCourseColor(this.subId, title, null).then(() => this.reload());
+  }
+
+  /** 新建课程（FAB）：整门课保存，落到本课表 */
+  saveCourse(name: string, room: string, teacher: string, occs: CourseOccDraft[]): void {
+    Repository.saveCourse(this.subId, '', name, room, teacher, occs).then(() => this.reload());
   }
 }

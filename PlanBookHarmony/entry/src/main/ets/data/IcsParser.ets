@@ -1,3 +1,4 @@
+import { CourseInfo } from '../common/CourseInfo';
 import { DateUtils } from '../common/DateUtils';
 
 /**
@@ -193,8 +194,8 @@ export class IcsParser {
     if (raw.length === 0) {
       return raw;
     }
-    const teacher = IcsParser.matchSegment(raw, '教师：');
-    const fullName = IcsParser.matchSegment(raw, '全称：');
+    const teacher = CourseInfo.matchSegment(raw, '教师：');
+    const fullName = CourseInfo.matchSegment(raw, '全称：');
     if (teacher === null && fullName === null) {
       return raw;
     }
@@ -206,24 +207,6 @@ export class IcsParser {
       parts.push(`全称：${fullName}`);
     }
     return parts.join('；');
-  }
-
-  /** 找「prefix 后到下一个 ;/；/换行」的片段；没有 prefix 返回 null */
-  private static matchSegment(raw: string, prefix: string): string | null {
-    const i = raw.indexOf(prefix);
-    if (i < 0) {
-      return null;
-    }
-    const j = i + prefix.length;
-    let end = j;
-    while (end < raw.length) {
-      const c = raw.charAt(end);
-      if (c === ';' || c === '；' || c === '\n') {
-        break;
-      }
-      end++;
-    }
-    return raw.substring(j, end).trim();
   }
 
   /** 解析 `20260907T083000Z` / `20260907T083000` / `20260907`（全天，time=null） */

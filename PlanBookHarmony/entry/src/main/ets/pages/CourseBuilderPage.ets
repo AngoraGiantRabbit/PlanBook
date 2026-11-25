@@ -1,8 +1,9 @@
 import { AppColors } from '../common/Theme';
 import { DateUtils } from '../common/DateUtils';
-import { CourseDraft, PeriodTimes, SlotDraft, TaskTypeLabels } from '../model/Models';
+import { CourseDraft, PeriodConfig, PeriodTimes, SlotDraft, TaskTypeLabels } from '../model/Models';
+import { PeriodEditor } from '../components/PeriodEditor';
 import { Repository } from '../data/Repository';
-import { DatePickerOverlay } from '../components/Pickers';
+import { DatePickerOverlay, TimePickerOverlay, parseTime } from '../components/Pickers';
 import { DialogShell, TextButton } from '../components/Ui';
 import { router } from '@kit.ArkUI';
 
@@ -26,6 +27,12 @@ struct CourseBuilderPage {
   @Local saving: boolean = false;
   /** 编辑模式：目标课桌子本 id */
   private subId: number = 0;
+  /** 节次配置（节数 + 每节起止时间，可编辑） */
+  @Local periods: PeriodConfig = PeriodConfig.default();
+  /** 节次小块编辑链：先开始后结束（选择器在页面根部渲染） */
+  @Local editingPeriodN: number = -1;
+  @Local pickPeriodStart: boolean = false;
+  @Local pickPeriodEnd: boolean = false;
 
   aboutToAppear(): void {
     this.courses = [new CourseDraft()];
@@ -33,7 +40,7 @@ struct CourseBuilderPage {
     const sid = params !== undefined && params !== null && params['subId'] !== undefined
       ? Number(params['subId']) : 0;
     if (sid > 0) {
-      // 编辑模式：载入已有课表定义
+      // 编辑模式：载入已有课表定义与节次配置
       this.subId = sid;
       Repository.getNotebookById(sid).then((nb) => {
         if (nb === null) {
@@ -48,6 +55,9 @@ struct CourseBuilderPage {
             this.courses = def.courses;
           }
         }
+      });
+      Repository.getTimetablePeriods(sid).then((p: PeriodConfig) => {
+        this.periods = p;
       });
     } else {
       Repository.getTermStart().then((t: string | null) => {
@@ -90,12 +100,12 @@ struct CourseBuilderPage {
       if (this.subId > 0) {
         Repository.setTermStart(this.termStart).then(() => {
           return Repository.updateTimetable(this.subId, this.tbName.trim(),
-            this.termStart, this.totalWeeks, this.courses);
+            this.termStart, this.totalWeeks, this.courses, this.periods);
         }).then(finish).catch(fail);
       } else {
         Repository.setTermStart(this.termStart).then(() => {
           return Repository.createTimetableSubNotebook(
-            master.id, this.tbName.trim(), this.termStart, this.totalWeeks, this.courses);
+            master.id, this.tbName.trim(), this.termStart, this.totalWeeks, this.courses, this.periods);
         }).then(finish).catch(fail);
       }
     });
@@ -152,30 +162,26 @@ struct CourseBuilderPage {
             . borderRadius(12)
             . backgroundColor(AppColors.surfaceVariant)
 
-            // ---------- 节次时间表（固定 10 节） ----------
+            // ---------- 节次时间（节数与每节起止可编辑） ----------
             Column({ space: 6 }) {
-              Text('节次时间表（固定）')
+              Text('节次时间')
                 . fontSize(14)
                 . fontWeight(FontWeight.Bold)
                 . fontColor(AppColors.onSurface)
                 . width('100%')
-              Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
-                ForEach(this.periodList(), (item: string) => {
-                  Text(item)
-                    . fontSize(11)
-                    . fontColor(AppColors.onSurfaceVariant)
-                    . padding({ left: 8, right: 8, top: 4, bottom: 4 })
-                    . margin(2)
-                    . borderRadius(8)
-                    . backgroundColor(AppColors.surface)
-                }, (item: string) => item)
-              }
-              . width('100%')
+              PeriodEditor({
+                config: this.periods,
+                onEditPeriod: (n: number) => {
+                  this.editingPeriodN = n;
+                  this.pickPeriodStart = true;
+                }
+              })
             }
             . width('100%')
             . padding(12)
             . borderRadius(12)
             . backgroundColor(AppColors.surfaceVariant)
+
 
             // ---------- 课程列表 ----------
             ForEach(this.courses, (course: CourseDraft, ci: number) => {
@@ -218,6 +224,31 @@ struct CourseBuilderPage {
           onDismiss: () => this.showTermPicker = false
         })
       }
+
+      // 节次起止选择器（根部渲染）：先开始后结束
+      if (this.pickPeriodStart && this.editingPeriodN > 0) {
+        TimePickerOverlay({
+          initialHour: this.periodInitHour(true),
+          initialMinute: this.periodInitMinute(true),
+          onConfirm: (t: string) => {
+            this.applyPeriodTime(true, t);
+            this.pickPeriodStart = false;
+            this.pickPeriodEnd = true;
+          },
+          onDismiss: () => this.pickPeriodStart = false
+        })
+      }
+      if (this.pickPeriodEnd && this.editingPeriodN > 0) {
+        TimePickerOverlay({
+          initialHour: this.periodInitHour(false),
+          initialMinute: this.periodInitMinute(false),
+          onConfirm: (t: string) => {
+            this.applyPeriodTime(false, t);
+            this.pickPeriodEnd = false;
+          },
+          onDismiss: () => this.pickPeriodEnd = false
+        })
+      }
       if (this.message !== null) {
         DialogShell({ onDismiss: () => this.message = null }) {
           Column({ space: 10 }) {
@@ -240,12 +271,13 @@ struct CourseBuilderPage {
 
   private periodList(): string[] {
     const out: string[] = [];
-    for (let n = 1; n <= PeriodTimes.count(); n++) {
-      const t = PeriodTimes.time(n);
-      out.push(`第${n}节 ${t[0]}-${t[1]}`);
+    for (let n = 1; n <= this.periods.count; n++) {
+      out.push(this.periods.label(n));
     }
     return out;
   }
+
+
 
   /** 数字步进器：[−] 值 [+] */
   @Builder
@@ -372,7 +404,7 @@ struct CourseBuilderPage {
           . fontSize(13)
           . fontColor(AppColors.onSurface)
           . width(34)
-        this.Stepper(slot.periodStart, 1, PeriodTimes.count(), (v: number): void => {
+        this.Stepper(slot.periodStart, 1, this.periods.count, (v: number): void => {
           slot.periodStart = v;
           if (slot.periodEnd < v) {
             slot.periodEnd = v;
@@ -381,7 +413,7 @@ struct CourseBuilderPage {
         Text('至')
           . fontSize(13)
           . fontColor(AppColors.onSurfaceVariant)
-        this.Stepper(slot.periodEnd, 1, PeriodTimes.count(), (v: number): void => {
+        this.Stepper(slot.periodEnd, 1, this.periods.count, (v: number): void => {
           slot.periodEnd = v;
           if (slot.periodStart > v) {
             slot.periodStart = v;
@@ -390,7 +422,7 @@ struct CourseBuilderPage {
         Text('节')
           . fontSize(13)
           . fontColor(AppColors.onSurface)
-        Text(`${PeriodTimes.time(slot.periodStart)[0]}-${PeriodTimes.time(slot.periodEnd)[1]}`)
+        Text(`${this.periods.time(slot.periodStart)[0]}-${this.periods.time(slot.periodEnd)[1]}`)
           . fontSize(12)
           . fontColor(AppColors.primary)
           . layoutWeight(1)
@@ -437,6 +469,23 @@ struct CourseBuilderPage {
     . border({ width: 1, color: AppColors.outline })
   }
 
+  private applyPeriodTime(isStart: boolean, t: string): void {
+    const n = this.editingPeriodN;
+    const cur = this.periods.time(n);
+    const next: string[] = isStart ? [t, cur[1]] : [cur[0], t];
+    this.periods.times[n - 1] = next;
+  }
+
+  private periodInitHour(isStart: boolean): number {
+    const p = parseTime(this.periods.time(this.editingPeriodN)[isStart ? 0 : 1]);
+    return p === null ? 8 : p[0];
+  }
+
+  private periodInitMinute(isStart: boolean): number {
+    const p = parseTime(this.periods.time(this.editingPeriodN)[isStart ? 0 : 1]);
+    return p === null ? 0 : p[1];
+  }
+
   /** 时间段摘要：展开次数与首次时间 */
   private slotSummary(slot: SlotDraft): string {
     const wEnd = Math.min(slot.weekEnd, this.totalWeeks);
@@ -445,8 +494,8 @@ struct CourseBuilderPage {
       return '该时间段在学期周数范围外，不会生成课程';
     }
     const first = DateUtils.addDays(this.termStart, (slot.weekStart - 1) * 7 + (slot.dow - 1));
-    const t0 = PeriodTimes.time(slot.periodStart)[0];
-    const t1 = PeriodTimes.time(slot.periodEnd)[1];
+    const t0 = this.periods.time(slot.periodStart)[0];
+    const t1 = this.periods.time(slot.periodEnd)[1];
     return `共 ${count} 次 · 首次 ${first} ${t0}-${t1}`;
   }
 }

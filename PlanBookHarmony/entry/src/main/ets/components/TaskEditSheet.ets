@@ -5,15 +5,13 @@ import { DialogShell, TextButton } from './Ui';
 import { DatePickerOverlay, PickerField, parseTime, TimePickerOverlay } from './Pickers';
 
 /**
- * 复用的任务编辑表单（对应 Android AddTaskDialog.kt 的 TaskEditSheet）：
- * 新建与编辑共用；readOnly = 导入子计划本只读快照（#12：禁编辑/删除，勾选完成不受限）。
- * 以全屏覆盖层呈现。
+ * 新建与编辑共用；以全屏覆盖层呈现。
+ * 课表子本的课程不走此表单（见 CourseEditSheet）。
  */
 @ComponentV2
 export struct TaskEditSheet {
   @Param notebookId: number = 0;
   @Param existing: Task | null = null;
-  @Param readOnly: boolean = false;
   @Event onDismiss: () => void = () => {};
   @Event onConfirm: (task: Task) => void = (_t: Task) => {};
   @Event onDelete: () => void = () => {};
@@ -126,27 +124,18 @@ export struct TaskEditSheet {
     Stack() {
       DialogShell({ onDismiss: () => this.onDismiss() }) {
       Column({ space: 10 }) {
-        Text(this.readOnly ? '任务详情（只读）' : (this.isNew ? '添加任务' : '编辑任务'))
+        Text(this.isNew ? '添加任务' : '编辑任务')
           . fontSize(17)
           . fontWeight(FontWeight.Bold)
           . alignSelf(ItemAlign.Start)
 
         Scroll() {
           Column({ space: 10 }) {
-            if (this.readOnly) {
-              // #12：导入子计划本为只读快照，防止 App 内改动后与源文件失去对应
-              Text('该任务来自导入子计划本（只读快照），不支持编辑或删除。课表有变请重新导入。')
-                . fontSize(12)
-                . fontColor(AppColors.tertiary)
-            }
             TextInput({ placeholder: '任务名称', text: this.title })
-              . enabled(!this.readOnly)
               . onChange((v: string) => this.title = v)
             TextInput({ placeholder: '备注（可选）', text: this.description })
-              . enabled(!this.readOnly)
               . onChange((v: string) => this.description = v)
             TextInput({ placeholder: '教室（可选，显示在任务块上）', text: this.location })
-              . enabled(!this.readOnly)
               . onChange((v: string) => this.location = v)
 
             // 四类型分段
@@ -161,11 +150,7 @@ export struct TaskEditSheet {
                     . backgroundColor(this.selectedType === type ? AppColors.primaryContainer : '#00000000')
                     . borderRadius(8)
                     . layoutWeight(1)
-                    . onClick(() => {
-                      if (!this.readOnly) {
-                        this.selectType(type);
-                      }
-                    })
+                    . onClick(() => this.selectType(type))
                 }, (type: TaskType) => type)
             }
             . width('100%')
@@ -175,14 +160,12 @@ export struct TaskEditSheet {
             PickerField({
               value: this.startDate,
               label: this.isSingleDayType ? '日期' : '开始日期',
-              isEnabled: !this.readOnly,
               onTap: () => this.showStartPicker = true
             })
             if (!this.isSingleDayType) {
               PickerField({
                 value: this.endDate,
                 label: this.selectedType === TaskType.LONG_TERM ? '截止日期 DDL' : '结束日期',
-                isEnabled: !this.readOnly,
                 onTap: () => this.showEndPicker = true
               })
             }
@@ -191,13 +174,11 @@ export struct TaskEditSheet {
               PickerField({
                 value: this.startTime,
                 label: '开始时间（可选，留空则无时段）',
-                isEnabled: !this.readOnly,
                 onTap: () => this.showStartPickerTime = true
               })
               PickerField({
                 value: this.endTime,
                 label: '结束时间（可选）',
-                isEnabled: !this.readOnly,
                 onTap: () => this.showEndPickerTime = true
               })
             }
@@ -220,9 +201,7 @@ export struct TaskEditSheet {
                       color: this.repeatRule === rule ? AppColors.primaryContainer : AppColors.outline
                     })
                     . onClick(() => {
-                      if (!this.readOnly) {
-                        this.repeatRule = rule;
-                      }
+                      this.repeatRule = rule;
                     })
                 }, (rule: RepeatRule) => rule)
               }
@@ -245,9 +224,7 @@ export struct TaskEditSheet {
                         color: this.selectedDays.has(day) ? AppColors.primaryContainer : AppColors.outline
                       })
                       . onClick(() => {
-                        if (!this.readOnly) {
-                          this.toggleDay(day);
-                        }
+                        this.toggleDay(day);
                       })
                   }, (day: number) => `${day}`)
                 }
@@ -264,7 +241,7 @@ export struct TaskEditSheet {
 
         // 底部按钮区
         Row({ space: 4 }) {
-          if (!this.readOnly && this.isPersisted) {
+          if (this.isPersisted) {
             TextButton({ label: '删除', color: AppColors.error, onTap: () => this.onDelete() })
           }
           if (this.isPersisted) {
@@ -274,17 +251,12 @@ export struct TaskEditSheet {
             })
           }
           Blank()
-          if (!this.readOnly) {
-            TextButton({ label: '取消', onTap: () => this.onDismiss() })
-            TextButton({
-              label: this.isNew ? '确定' : '保存',
-              isEnabled: this.title.trim().length > 0,
-              onTap: () => this.confirm()
-            })
-          } else {
-            // 只读：仅保留关闭（勾选完成不受限）
-            TextButton({ label: '关闭', onTap: () => this.onDismiss() })
-          }
+          TextButton({ label: '取消', onTap: () => this.onDismiss() })
+          TextButton({
+            label: this.isNew ? '确定' : '保存',
+            isEnabled: this.title.trim().length > 0,
+            onTap: () => this.confirm()
+          })
         }
       }
       . width('100%')

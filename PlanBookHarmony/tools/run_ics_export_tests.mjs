@@ -11,10 +11,12 @@ mkdirSync(outDir, { recursive: true });
 
 const du = readFileSync(resolve(root, 'entry/src/main/ets/common/DateUtils.ets'), 'utf8');
 writeFileSync(resolve(outDir, 'DateUtils.ts'), du);
-const ip = readFileSync(resolve(root, 'entry/src/main/ets/data/IcsParser.ets'), 'utf8');
-writeFileSync(resolve(outDir, 'IcsParser.ts'), ip.replace(
-  "import { DateUtils } from '../common/DateUtils';",
-  "import { DateUtils } from './DateUtils.ts';"));
+const ci = readFileSync(resolve(root, 'entry/src/main/ets/common/CourseInfo.ets'), 'utf8');
+writeFileSync(resolve(outDir, 'CourseInfo.ts'), ci);
+const ip = readFileSync(resolve(root, 'entry/src/main/ets/data/IcsParser.ets'), 'utf8')
+  .replace("import { DateUtils } from '../common/DateUtils';", "import { DateUtils } from './DateUtils.ts';")
+  .replace("import { CourseInfo } from '../common/CourseInfo';", "import { CourseInfo } from './CourseInfo.ts';");
+writeFileSync(resolve(outDir, 'IcsParser.ts'), ip);
 // IcsExporter 依赖 @ohos（fs/picker）——只取纯函数部分：去掉 @ohos import 与 saveToFile
 let ie = readFileSync(resolve(root, 'entry/src/main/ets/data/IcsExporter.ets'), 'utf8');
 ie = ie.replace(/import \{ Task \} from '..\/model\/Models';/, 'class Task {}\nconst __unused = null;');

@@ -1,8 +1,10 @@
 import { AppColors, ColorUtil, Dimens } from '../common/Theme';
+import { CourseInfo } from '../common/CourseInfo';
 import { DateUtils } from '../common/DateUtils';
-import { Notebook, Task, TaskType } from '../model/Models';
+import { CourseOccDraft, Notebook, Task, TaskType } from '../model/Models';
 import { PlanBookVM } from '../viewmodel/ViewModels';
 import { TaskEditSheet } from '../components/TaskEditSheet';
+import { CourseEditSheet } from '../components/CourseEditSheet';
 import { WidgetSync } from '../widget/WidgetSync';
 import { common } from '@kit.AbilityKit';
 
@@ -47,8 +49,7 @@ export struct PlanBookPage {
       . borderRadius(28)
       . backgroundColor(AppColors.primary)
       . shadow(ShadowStyle.OUTER_DEFAULT_MD)
-      . margin(16)
-      . onClick(() => this.vm.showAddTaskDialog())
+      . onClick(() => this.vm.openAdd())
 
       if (this.vm.showAddDialog) {
         TaskEditSheet({
@@ -63,7 +64,6 @@ export struct PlanBookPage {
         TaskEditSheet({
           notebookId: this.vm.editing.notebookId,
           existing: this.vm.editing,
-          readOnly: this.vm.editingReadOnly,
           onDismiss: () => this.vm.closeTaskEditor(),
           onConfirm: (t: Task) => this.vm.saveEditedTask(t),
           onDelete: () => {
@@ -76,6 +76,38 @@ export struct PlanBookPage {
               this.vm.toggleTaskComplete(this.vm.editing);
             }
             this.vm.closeTaskEditor();
+          }
+        })
+      }
+      // 课程表单：活动子本是课表时，加号/空白时段/课程块点击走课程编辑（整门课，区别于任务表单）
+      if (this.vm.showAddCourse) {
+        CourseEditSheet({
+          notebookId: this.vm.activeSub !== null ? this.vm.activeSub.id : 0,
+          existing: this.vm.coursePrefill,
+          onConfirm: (name: string, room: string, teacher: string, occs: CourseOccDraft[]) => {
+            const nb = this.vm.activeSub;
+            this.vm.saveCourse(nb !== null ? nb.id : 0, '', name, room, teacher, occs);
+          },
+          onDismiss: () => this.vm.hideAddCourseDialog()
+        })
+      }
+      if (this.vm.editingCourse !== null) {
+        CourseEditSheet({
+          notebookId: this.vm.editingCourse.notebookId,
+          existing: this.vm.editingCourse,
+          readOnly: this.vm.courseReadOnly,
+          onDismiss: () => this.vm.closeCourseEditor(),
+          onConfirm: (name: string, room: string, teacher: string, occs: CourseOccDraft[]) => {
+            const editing = this.vm.editingCourse;
+            if (editing !== null) {
+              this.vm.saveCourse(editing.notebookId, editing.title, name, room, teacher, occs);
+            }
+          },
+          onDelete: () => {
+            const editing = this.vm.editingCourse;
+            if (editing !== null) {
+              this.vm.deleteCourse(editing);
+            }
           }
         })
       }
@@ -168,6 +200,12 @@ export struct PlanBookPage {
           Row({ space: 5 }) {
             Circle({ width: 9, height: 9 })
               . fill(ColorUtil.safe(sub.color))
+            if (sub.isTimetable) {
+              // 课表 chip 标识：与普通子计划本区分（点按仍可设为活动 → 点课编辑）
+              SymbolGlyph($r('sys.symbol.calendar'))
+                . fontSize(11)
+                . fontColor([sub.id === this.activeSubId() ? AppColors.onPrimaryContainer : AppColors.onSurfaceVariant])
+            }
             Text(sub.name)
               . fontSize(13)
               . fontColor(sub.id === this.activeSubId() ? AppColors.onPrimaryContainer : AppColors.onSurfaceVariant)
@@ -186,7 +224,7 @@ export struct PlanBookPage {
           . onClick(() => this.vm.switchActiveSub(sub))
           . gesture(LongPressGesture({ repeat: false, duration: 350 })
             . onAction((_e: GestureEvent) => this.vm.toggleSubVisible(sub)))
-        }, (sub: Notebook) => `${sub.id}-${sub.name}-${sub.isVisible}-${sub.isActive}`)
+        }, (sub: Notebook) => `${sub.id}-${sub.name}-${sub.isVisible}-${sub.isActive}-${sub.isTimetable}`)
       }
       . padding({ left: 8, right: 8, top: 2, bottom: 2 })
     }
@@ -278,6 +316,15 @@ export struct PlanBookPage {
     . alignItems(HorizontalAlign.Start)
   }
 
+  private subOf(notebookId: number): Notebook | null {
+    for (const s of this.vm.subs) {
+      if (s.id === notebookId) {
+        return s;
+      }
+    }
+    return null;
+  }
+
   /** 某日的时段任务（DAILY 已展开 startDate==endDate==该天；ONE_OFF/FLEX 单天；LONG_TERM 无 startTime 不进入） */
   private timedTasksOf(date: string): Task[] {
     const out: Task[] = [];
@@ -296,6 +343,11 @@ export struct PlanBookPage {
       }
     }
     return null;
+  }
+
+  /** 课程块第三行：备注中的「教师：」段（普通任务无该段则不显示） */
+  private teacherOf(task: Task): string {
+    return CourseInfo.teacherOf(task.description);
   }
 
   /** 该任务块起止分钟（相对 06:00） */
@@ -328,7 +380,7 @@ export struct PlanBookPage {
             . width('100%')
             . height(Dimens.hourHeight)
             . border({ width: { bottom: 0.5 }, color: AppColors.gridLine })
-            . onClick(() => this.vm.showAddTaskDialogWithPrefill(date, Dimens.startHour + idx))
+            . onClick(() => this.vm.openAddAt(date, Dimens.startHour + idx))
         }, (label: string, idx: number) => `${label}-${idx}`)
       }
       . width('100%')
@@ -338,7 +390,7 @@ export struct PlanBookPage {
       // 任务块（绝对定位 + 并列分列）
       ForEach(this.timedTasksOf(date), (task: Task) => {
         this.TaskBlock(task)
-      }, (task: Task) => `${task.id}-${task.startDate}-${task.isCompleted}-${task.startTime}-${task.endTime}-${this.subColorOf(task.notebookId)}`)
+      }, (task: Task) => `${task.id}-${task.title}-${task.startDate}-${task.isCompleted}-${task.startTime}-${task.endTime}-${this.blockColor(task)}-${this.teacherOf(task)}`)
     }
     . layoutWeight(1)
     . height('100%')
@@ -363,6 +415,14 @@ export struct PlanBookPage {
             . maxLines(1)
             . textOverflow({ overflow: TextOverflow.Ellipsis })
         }
+        // #16：App 内课程块显示老师（桌面卡片保持 简称+教室 不变）
+        if (this.teacherOf(task).length > 0) {
+          Text(this.teacherOf(task))
+            . fontSize(10)
+            . fontColor(AppColors.onSurfaceVariant)
+            . maxLines(1)
+            . textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
       }
       . width('100%')
       . height('100%')
@@ -376,6 +436,24 @@ export struct PlanBookPage {
     . height(this.blockHeightVp(task))
     . position({ x: this.blockXPct(task), y: this.blockYVp(task) })
     . padding(1)
+  }
+
+  private blockColor(task: Task): string {
+    const sub = this.subOf(task.notebookId);
+    let base: string | null = this.subColorOf(task.notebookId);
+    if (sub !== null && sub.isTimetable) {
+      // 课程颜色：按课表，一门课一个颜色（未设置的课回退课表色）
+      const inner = this.vm.courseColors.get(`${task.notebookId}`);
+      if (inner !== undefined) {
+        const courseColor = inner.get(task.title);
+        if (courseColor !== undefined) {
+          base = courseColor;
+        }
+      }
+    }
+    const finalBase = base !== null ? base
+      : (task.reviewType !== null ? AppColors.tertiaryContainer : AppColors.primaryContainer);
+    return ColorUtil.withAlpha(finalBase, task.isCompleted ? 0.35 : 1);
   }
 
   private blockXPct(task: Task): string {
@@ -400,12 +478,6 @@ export struct PlanBookPage {
     return dur * (Dimens.hourHeight / 60);
   }
 
-  private blockColor(task: Task): string {
-    const sub = this.subColorOf(task.notebookId);
-    const base = sub !== null ? sub
-      : (task.reviewType !== null ? AppColors.tertiaryContainer : AppColors.primaryContainer);
-    return ColorUtil.withAlpha(base, task.isCompleted ? 0.35 : 1);
-  }
 
   private onTaskClick(task: Task): void {
     if (task.isAutoReview) {

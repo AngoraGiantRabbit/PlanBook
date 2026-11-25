@@ -1,10 +1,12 @@
 import { relationalStore } from '@kit.ArkData';
+import { IcsTask } from './IcsParser';
 import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { DateUtils } from '../common/DateUtils';
-import { IcsTask } from './IcsParser';
+import { CourseInfo } from '../common/CourseInfo';
+import { ColorUtil } from '../common/Theme';
 import {
-  CourseDraft, Notebook, PeriodTimes, Review, ReviewSetting, ReviewType, RepeatRule, SlotDraft,
+  CourseDraft, CourseOccDraft, Notebook, PeriodConfig, PeriodTimes, Review, ReviewSetting, ReviewType, RepeatRule, SlotDraft,
   SubNotebookPalette, Task, TaskType
 } from '../model/Models';
 
@@ -144,6 +146,8 @@ export class Repository {
         // duplicate column：忽略
       }
     }
+    // v8 注：ICS 导入是否算课表由导入时选择（importIcsSubNotebook 的 asTimetable），
+    // 不再按 importSource 自动标记。
   }
 
   static async whenReady(): Promise<void> {
@@ -262,7 +266,7 @@ export class Repository {
 
   /** 主计划本（全局唯一；复盘、复盘设置、自动复盘待办挂它） */
   static async getMasterNotebookOnce(): Promise<Notebook | null> {
-    const rs = await Repository.q('SELECT * FROM notebooks WHERE parentId IS NULL LIMIT 1', []);
+    const rs = await Repository.q('SELECT id, name, parentId, color, isVisible, isActive, importSource, createdAt, isTimetable, timetableJson FROM notebooks WHERE parentId IS NULL LIMIT 1', []);
     let result: Notebook | null = null;
     if (rs.goToNextRow()) {
       result = Repository.notebookFromRow(rs);
@@ -273,7 +277,7 @@ export class Repository {
 
   /** 某主计划本下的全部子计划本（含隐藏），按创建序 */
   static async getSubNotebooksOnce(masterId: number): Promise<Notebook[]> {
-    const rs = await Repository.q('SELECT * FROM notebooks WHERE parentId = ? ORDER BY createdAt', [masterId]);
+    const rs = await Repository.q('SELECT id, name, parentId, color, isVisible, isActive, importSource, createdAt, isTimetable, timetableJson FROM notebooks WHERE parentId = ? ORDER BY createdAt', [masterId]);
     const out: Notebook[] = [];
     while (rs.goToNextRow()) {
       out.push(Repository.notebookFromRow(rs));
@@ -284,7 +288,7 @@ export class Repository {
 
   /** 按 id 取子计划本 */
   static async getNotebookById(id: number): Promise<Notebook | null> {
-    const rs = await Repository.q('SELECT * FROM notebooks WHERE id = ? LIMIT 1', [id]);
+    const rs = await Repository.q('SELECT id, name, parentId, color, isVisible, isActive, importSource, createdAt, isTimetable, timetableJson FROM notebooks WHERE id = ? LIMIT 1', [id]);
     let n: Notebook | null = null;
     if (rs.goToNextRow()) {
       n = Repository.notebookFromRow(rs);
@@ -358,17 +362,19 @@ export class Repository {
   }
 
   /**
-   * #11（ADR-0005）：ICS 导入建本——生成导入子计划本（只读快照标记 importSource），
-   * 任务为解析展开出的单天临时任务。
-   * #12：同 importSource 的旧导入子本整本删除重建（完成态丢弃）；旧本为活动子本时新本继承。
+   * #11（ADR-0005）：ICS 导入建本，导入方式可选——
+   * 作为课表（asTimetable=true：设为活动后可在周视图点课编辑、加号加课、课程颜色）
+   * 或普通子计划本（课程即任务：可勾选完成、进待办列表）。importSource 溯源。
+   * #12：同 importSource 的旧导入子本整本删除重建（按本次选择的类型重建）；旧本活动态/颜色继承。
    * 整体在一个事务里：失败回滚，不产生半成品。
    */
-  static importIcsSubNotebook(masterId: number, sourceName: string, icsTasks: IcsTask[]): Promise<IcsImportResult> {
+  static importIcsSubNotebook(masterId: number, sourceName: string, icsTasks: IcsTask[],
+    asTimetable: boolean): Promise<IcsImportResult> {
     return Repository.enqueue(async (): Promise<IcsImportResult> => {
       await Repository.whenReady();
       // #12：重导整本重建——先删同名旧导入子本（含其任务）
       const oldRs = await Repository.q(
-        'SELECT * FROM notebooks WHERE parentId = ? AND importSource = ? LIMIT 1', [masterId, sourceName]);
+        'SELECT id, name, parentId, color, isVisible, isActive, importSource, createdAt, isTimetable, timetableJson FROM notebooks WHERE parentId = ? AND importSource = ? LIMIT 1', [masterId, sourceName]);
       let old: Notebook | null = null;
       if (oldRs.goToNextRow()) {
         old = Repository.notebookFromRow(oldRs);
@@ -380,12 +386,13 @@ export class Repository {
         await Repository.run('DELETE FROM task_completions WHERE taskId IN (SELECT id FROM tasks WHERE notebookId = ?)', [old.id]);
         await Repository.run('DELETE FROM tasks WHERE notebookId = ?', [old.id]);
         await Repository.run('DELETE FROM notebooks WHERE id = ?', [old.id]);
-        inheritActive = old.isActive;
-        inheritColor = old.color; // 保留旧本颜色，用户改过的不丢
       }
       const existing = await Repository.getSubNotebooksOnce(masterId);
+      // 导入方式可选：作为课表（isTimetable=1，点课编辑/课程颜色）或普通子计划本（任务语义）；
+      // importSource 溯源不变（同源重导整本替换）
       const subId = await Repository.insertNotebookRow(sourceName, masterId,
-        inheritColor ?? SubNotebookPalette.forIndex(existing.length), true, inheritActive, sourceName);
+        inheritColor ?? SubNotebookPalette.forIndex(existing.length), true, inheritActive, sourceName,
+        asTimetable, null);
       const store = Repository.db();
       store.beginTransaction();
       try {
@@ -410,7 +417,7 @@ export class Repository {
   /** 切换活动子计划本（写操作目标） */
   static setActiveSubNotebook(subNotebookId: number): Promise<void> {
     return Repository.enqueue(async (): Promise<void> => {
-      const rs = await Repository.q('SELECT * FROM notebooks WHERE id = ? LIMIT 1', [subNotebookId]);
+      const rs = await Repository.q('SELECT id, name, parentId, color, isVisible, isActive, importSource, createdAt, isTimetable, timetableJson FROM notebooks WHERE id = ? LIMIT 1', [subNotebookId]);
       let sub: Notebook | null = null;
       if (rs.goToNextRow()) {
         sub = Repository.notebookFromRow(rs);
@@ -459,8 +466,16 @@ export class Repository {
       }
       const remaining = await Repository.getSubNotebooksOnce(notebook.parentId);
       if (notebook.isActive && remaining.length > 0) {
+        // 优先回落到普通子计划本（课表作为活动写目标由用户显式选择）
+        let next = remaining[0];
+        for (const r of remaining) {
+          if (!r.isTimetable) {
+            next = r;
+            break;
+          }
+        }
         await Repository.run('UPDATE notebooks SET isActive = 0 WHERE parentId = ?', [notebook.parentId]);
-        await Repository.run('UPDATE notebooks SET isActive = 1 WHERE id = ?', [remaining[0].id]);
+        await Repository.run('UPDATE notebooks SET isActive = 1 WHERE id = ?', [next.id]);
       }
       Repository.notify();
     });
@@ -747,6 +762,19 @@ export class Repository {
       await Repository.ensureSubNotebookColors(masterId);
       await Repository.ensureAutoReviewTasks(masterId, weekStart);
     });
+  }
+
+  /** 某课表内一门课的全部节次（同 title，按日期/时间升序）——编辑课程用 */
+  static async getCourseTasks(notebookId: number, title: string): Promise<Task[]> {
+    const rs = await Repository.q(
+      `SELECT ${Repository.taskCols()} FROM tasks WHERE notebookId = ? AND title = ? ` +
+      'ORDER BY startDate, startTime', [notebookId, title]);
+    const out: Task[] = [];
+    while (rs.goToNextRow()) {
+      out.push(Repository.taskFromRow(rs));
+    }
+    rs.close();
+    return out;
   }
 
   /** ADR-0003：长期任务过 DDL 自动标记完成（惰性触发，无后台任务） */
@@ -1086,25 +1114,250 @@ export class Repository {
     });
   }
 
+  // ---------- 课表节次配置（每课表独立：节数 + 每节起止时间） ----------
+
+  /** 某课表的节次配置；未配置返回默认大学 10 节表 */
+  static async getTimetablePeriods(notebookId: number): Promise<PeriodConfig> {
+    const rs = await Repository.q('SELECT value FROM app_settings WHERE key = \'timetablePeriods\' LIMIT 1', []);
+    let raw: string | null = null;
+    if (rs.goToNextRow()) {
+      raw = rs.getString(0);
+    }
+    rs.close();
+    if (raw === null || raw.length === 0) {
+      return PeriodConfig.default();
+    }
+    try {
+      const parsed = JSON.parse(raw) as Record<string, Object>;
+      const entry = parsed[`${notebookId}`] as Record<string, Object>;
+      if (entry === undefined) {
+        return PeriodConfig.default();
+      }
+      const config = new PeriodConfig();
+      config.count = entry['count'] as number;
+      config.times = [];
+      const times = entry['times'] as string[][];
+      for (const t of times) {
+        config.times.push([t[0], t[1]]);
+      }
+      return config;
+    } catch (e) {
+      return PeriodConfig.default();
+    }
+  }
+
+  /** 保存某课表的节次配置 */
+  static setTimetablePeriods(notebookId: number, config: PeriodConfig): Promise<void> {
+    return Repository.enqueue(async (): Promise<void> => {
+      const rs = await Repository.q('SELECT value FROM app_settings WHERE key = \'timetablePeriods\' LIMIT 1', []);
+      let raw: string | null = null;
+      if (rs.goToNextRow()) {
+        raw = rs.getString(0);
+      }
+      rs.close();
+      let map: Record<string, Object> = {};
+      if (raw !== null && raw.length > 0) {
+        try {
+          map = JSON.parse(raw) as Record<string, Object>;
+        } catch (e) {
+          map = {};
+        }
+      }
+      const entry: Record<string, Object> = { 'count': config.count, 'times': config.times };
+      map[`${notebookId}`] = entry;
+      await Repository.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (\'timetablePeriods\', ?)',
+        [JSON.stringify(map)]);
+      Repository.notify();
+    });
+  }
+
+  // ---------- 课程颜色（按课表管理：一门课一个颜色，同课表内简称相同 = 同一门课） ----------
+
+  /** 某课表的课程名列表（DISTINCT title），按名称排序 */
+  static async getCourseTitles(notebookId: number): Promise<string[]> {
+    const rs = await Repository.q(
+      'SELECT DISTINCT title FROM tasks WHERE notebookId = ? ORDER BY title', [notebookId]);
+    const out: string[] = [];
+    while (rs.goToNextRow()) {
+      out.push(rs.getString(0));
+    }
+    rs.close();
+    return out;
+  }
+
+  /** courseColors 原始 JSON（{课表id: {课程名: "#RRGGBB"}}）→ 解析后的嵌套 Map；空/非法返回空 */
+  private static async getCourseColorTree(): Promise<Map<string, Map<string, string>>> {
+    const rs = await Repository.q('SELECT value FROM app_settings WHERE key = \'courseColors\' LIMIT 1', []);
+    let raw: string | null = null;
+    if (rs.goToNextRow()) {
+      raw = rs.getString(0);
+    }
+    rs.close();
+    const tree = new Map<string, Map<string, string>>();
+    if (raw === null || raw.length === 0) {
+      return tree;
+    }
+    try {
+      const parsed = JSON.parse(raw) as Record<string, Object>;
+      for (const nbKey of Object.keys(parsed)) {
+        const inner = parsed[nbKey] as Record<string, string>;
+        const m = new Map<string, string>();
+        for (const title of Object.keys(inner)) {
+          const v = inner[title];
+          if (ColorUtil.isHex(v)) {
+            m.set(title, v);
+          }
+        }
+        tree.set(nbKey, m);
+      }
+    } catch (e) {
+      // 非法 JSON：当未设置处理
+    }
+    return tree;
+  }
+
+  /** 全部课程颜色（课表id → 课程名 → 颜色）；渲染（周视图/卡片）用 */
+  static async getAllCourseColors(): Promise<Map<string, Map<string, string>>> {
+    return Repository.getCourseColorTree();
+  }
+
+  /** 某课表的课程颜色（课程名 → "#RRGGBB"；未设置的课不在 map 中，渲染回退课表色） */
+  static async getCourseColors(notebookId: number): Promise<Map<string, string>> {
+    const tree = await Repository.getCourseColorTree();
+    const m = tree.get(`${notebookId}`);
+    return m === undefined ? new Map<string, string>() : m;
+  }
+
+  /** 设置/清除某课表内一门课的颜色（color = null 清除，回退课表色） */
+  static setCourseColor(notebookId: number, title: string, color: string | null): Promise<void> {
+    return Repository.enqueue(async (): Promise<void> => {
+      const tree = await Repository.getCourseColorTree();
+      const key = `${notebookId}`;
+      let m = tree.get(key);
+      if (m === undefined) {
+        m = new Map<string, string>();
+        tree.set(key, m);
+      }
+      if (color === null) {
+        m.delete(title);
+      } else if (ColorUtil.isHex(color)) {
+        m.set(title, color);
+      }
+      if (m.size === 0) {
+        tree.delete(key);
+      }
+      const obj: Record<string, Object> = {};
+      for (const nbKey of Array.from(tree.keys())) {
+        const inner = tree.get(nbKey);
+        if (inner === undefined) {
+          continue;
+        }
+        const innerObj: Record<string, string> = {};
+        for (const t of Array.from(inner.keys())) {
+          const v = inner.get(t);
+          if (v !== undefined) {
+            innerObj[t] = v;
+          }
+        }
+        obj[nbKey] = innerObj;
+      }
+      await Repository.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (\'courseColors\', ?)',
+        [JSON.stringify(obj)]);
+      Repository.notify();
+    });
+  }
+
+  // ---------- 整门课保存/删除（课程编辑共享写路径） ----------
+
+  /**
+   * 保存整门课（oldTitle 为空 = 新建）：名称/教室/老师对该课表内同名全部节次生效；
+   * 节次按 id 差量（更新/新增/删除）。整链一个 enqueue。
+   */
+  static saveCourse(notebookId: number, oldTitle: string, name: string, room: string,
+    teacher: string, occs: CourseOccDraft[]): Promise<void> {
+    return Repository.enqueue(async (): Promise<void> => {
+      const originals: Task[] = oldTitle.length > 0
+        ? await Repository.getCourseTasks(notebookId, oldTitle) : [];
+      const kept = new Set<number>();
+      for (const o of occs) {
+        if (o.id > 0) {
+          kept.add(o.id);
+        }
+      }
+      for (const t of originals) {
+        if (!kept.has(t.id)) {
+          await Repository.run('DELETE FROM task_completions WHERE taskId = ?', [t.id]);
+          await Repository.run('DELETE FROM tasks WHERE id = ?', [t.id]);
+        }
+      }
+      const byId = new Map<number, Task>();
+      for (const t of originals) {
+        byId.set(t.id, t);
+      }
+      for (const o of occs) {
+        const base = byId.get(o.id);
+        const t = base === undefined ? new Task() : Task.copy(base);
+        t.notebookId = notebookId;
+        t.title = name;
+        t.description = CourseInfo.withTeacher(base === undefined ? '' : base.description, teacher);
+        t.location = room.length > 0 ? room : null;
+        t.type = TaskType.ONE_OFF;
+        t.startDate = o.date;
+        t.endDate = o.date;
+        t.startTime = o.start;
+        t.endTime = o.end;
+        t.repeatRule = null;
+        t.weeklyDays = null;
+        t.isCompleted = false;
+        t.completedAt = null;
+        t.isAutoReview = false;
+        t.reviewType = null;
+        if (t.createdAt === 0) {
+          t.createdAt = Date.now();
+        }
+        if (o.id > 0) {
+          await Repository.updateTask(t);
+        } else {
+          await Repository.insertTaskRow(t);
+        }
+      }
+      Repository.notify();
+    });
+  }
+
+  /** 删除整门课：该课表内同名全部节次 */
+  static deleteCourse(notebookId: number, title: string): Promise<void> {
+    return Repository.enqueue(async (): Promise<void> => {
+      const originals = await Repository.getCourseTasks(notebookId, title);
+      for (const t of originals) {
+        await Repository.run('DELETE FROM task_completions WHERE taskId = ?', [t.id]);
+        await Repository.run('DELETE FROM tasks WHERE id = ?', [t.id]);
+      }
+      Repository.notify();
+    });
+  }
+
+
   // ---------- 手动新建课表 ----------
 
   /**
    * 新建课表子本：课表 = 普通子计划本（不设 importSource，任务可编辑），
-   * 每个「时间段（周几 × 节次 × 周次区间）」逐周展开为单天临时任务（与 ICS 导入同语义）。
-   * 日期 = 学期第一周周一 + (周次-1)*7 + (周几-1)；时间取预置节次表。
+   * 每个「时间段（周几 × 节次 × 周次区间）」逐周展开为单天课程（与 ICS 导入同语义）。
+   * 日期 = 学期第一周周一 + (周次-1)*7 + (周几-1)；时间取该课表的节次配置（可编辑）。
    */
   static createTimetableSubNotebook(masterId: number, name: string, termStart: string,
-    totalWeeks: number, courses: CourseDraft[]): Promise<number> {
+    totalWeeks: number, courses: CourseDraft[], periods: PeriodConfig): Promise<number> {
     return Repository.enqueue(async (): Promise<number> => {
       const defJson = Repository.timetableToJson(termStart, totalWeeks, courses);
       const subId = await Repository.insertNotebookRow(name, masterId, null, true, false, null, true, defJson);
+      await Repository.setTimetablePeriods(subId, periods); // 链内重入：直接执行
       const store = Repository.db();
       store.beginTransaction();
       try {
         for (const course of courses) {
           for (const slot of course.slots) {
-            const pt0 = PeriodTimes.time(slot.periodStart)[0];
-            const pt1 = PeriodTimes.time(slot.periodEnd)[1];
+            const pt0 = periods.time(slot.periodStart)[0];
+            const pt1 = periods.time(slot.periodEnd)[1];
             const wEnd = Math.min(slot.weekEnd, totalWeeks);
             for (let w = slot.weekStart; w <= wEnd; w++) {
               const date = DateUtils.addDays(termStart, (w - 1) * 7 + (slot.dow - 1));
@@ -1180,15 +1433,16 @@ export class Repository {
   }
 
   /**
-   * 编辑课表：更新名称与定义 JSON，整本事务重建任务（先删后建）。
-   * 课桌子的按天完成记录随任务一并清理。
+   * 编辑课表：更新名称与定义 JSON，整本事务重建任务（先删后建）；
+   * 时间取该课表的节次配置（可编辑）一并保存。
    */
   static updateTimetable(subId: number, name: string, termStart: string,
-    totalWeeks: number, courses: CourseDraft[]): Promise<void> {
+    totalWeeks: number, courses: CourseDraft[], periods: PeriodConfig): Promise<void> {
     return Repository.enqueue(async (): Promise<void> => {
       const defJson = Repository.timetableToJson(termStart, totalWeeks, courses);
       await Repository.run('UPDATE notebooks SET name = ?, timetableJson = ? WHERE id = ?',
         [name, defJson, subId]);
+      await Repository.setTimetablePeriods(subId, periods); // 链内重入：直接执行
       const store = Repository.db();
       store.beginTransaction();
       try {
@@ -1196,8 +1450,8 @@ export class Repository {
         await store.executeSql('DELETE FROM tasks WHERE notebookId = ?', [subId]);
         for (const course of courses) {
           for (const slot of course.slots) {
-            const pt0 = PeriodTimes.time(slot.periodStart)[0];
-            const pt1 = PeriodTimes.time(slot.periodEnd)[1];
+            const pt0 = periods.time(slot.periodStart)[0];
+            const pt1 = periods.time(slot.periodEnd)[1];
             const wEnd = Math.min(slot.weekEnd, totalWeeks);
             for (let w = slot.weekStart; w <= wEnd; w++) {
               const date = DateUtils.addDays(termStart, (w - 1) * 7 + (slot.dow - 1));

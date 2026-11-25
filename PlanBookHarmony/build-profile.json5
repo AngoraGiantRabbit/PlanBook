@@ -7,11 +7,11 @@
         "material": {
           "certpath": "C:\\Users\\XXL04\\.ohos\\config\\default_PlanBookHarmony_sPYAM2uFgYi3dkwwHrPTP_XTadUsndOqNTsKTmUw4CU=.cer",
           "keyAlias": "debugKey",
-          "keyPassword": "0000001BA0F071B70CA4DA0C6552115D9289D45AD8C2CAA0A62274C5A745DD0D5165A09D2742603A2E43E8",
+          "keyPassword": "0000001AEAE2501619E516F08DF2F63041723156C39133A0077DA67664F94EED1B58F75268E7109B1438",
           "profile": "C:\\Users\\XXL04\\.ohos\\config\\default_PlanBookHarmony_sPYAM2uFgYi3dkwwHrPTP_XTadUsndOqNTsKTmUw4CU=.p7b",
           "signAlg": "SHA256withECDSA",
           "storeFile": "C:\\Users\\XXL04\\.ohos\\config\\default_PlanBookHarmony_sPYAM2uFgYi3dkwwHrPTP_XTadUsndOqNTsKTmUw4CU=.p12",
-          "storePassword": "0000001BA0185C0FEF423057B6986CC9EBACA8BF5935574940F0EF6BD9679DBB0BD3B09A389892A35F244F"
+          "storePassword": "0000001A79C751439ECB4575D453BD8F8FD001D12B43A748FB7E6E8637417C38B4C87C5DA7A2C7329725"
         }
       }
     ],

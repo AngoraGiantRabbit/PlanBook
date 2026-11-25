@@ -1,6 +1,6 @@
 # PlanBook 交接文档
 
-> 更新于 2026-09-14 · 版本 1.11（versionCode 12）· 单人开发项目，历史上由 AI agent 辅助迭代
+> 更新于 2026-10-16 · Android 版 1.11（versionCode 12）/ 鸿蒙原生版 v1.3.0（versionCode 4）· 单人开发项目，历史上由 AI agent 辅助迭代
 > 配套文档：领域语言见 [CONTEXT.md](../CONTEXT.md)，架构决策见 [docs/adr/](./adr/)，agent 工作约定见 [docs/agents/](./agents/)
 
 ## 1. 项目是什么
@@ -175,7 +175,7 @@ Repository.observeExpandedTasks(masterId, subIds, days)   ← 唯一展开/完�
 2. **保持"写走 repository、读走观察管道"的纪律**——这是三页联动的根基；新页面照抄三个 VM 的管道模式（状态驱动 flatMapLatest）
 3. **版本号随手迭代**（minor+1/versionCode+1），提交信息按现有风格写清"改了什么+为什么+验证方式"——这个仓库的历史提交就是最好的变更日志
 
-## 10. 鸿蒙原生版（PlanBookHarmony）— v1.1.0
+## 10. 鸿蒙原生版（PlanBookHarmony）— v1.2.0
 
 `PlanBookHarmony/` 是本 App 的**鸿蒙原生重写**（ArkTS/ArkUI + RelationalStore + ArkTS 卡片，API 26），
 领域语义与 Android 版共用根目录 CONTEXT.md 与 docs/adr/ 的全部决策。
@@ -184,7 +184,7 @@ Repository.observeExpandedTasks(masterId, subIds, days)   ← 唯一展开/完�
   （IcsParser 19 例 + IcsExporter roundtrip 7 例，Node 直跑 .ets）；坑与规避见该目录 README
 - 架构映射：Room Flow → Repository 写后通知总线；Compose → 状态管理 V2（@ObservedV2 VM）；
   Glance → FormExtensionAbility + ArkTS 卡片
-- 已知差异：浅色固定主题（无深色模式）；DB 全新 schema 起步（现 v7，v6→v7 自动加列；两版数据不互通）
+- 已知差异：浅色固定主题（无深色模式）；DB 全新 schema 起步（现 v8：v6→v7 自动加课表列，v7→v8 导入子本自动标课表；两版数据不互通）
 
 ### 10.1 卡片子系统（多开 · 独立配置 · 卡内翻周 · 自动同步）
 
@@ -198,7 +198,31 @@ Repository.observeExpandedTasks(masterId, subIds, days)   ← 唯一展开/完�
 - **卡片渲染两大坑**（都有解）：无子项占位 Column 的百分比高度会塌 0（改每项占满 2 小时）；
   ForEach key 不含变化量则不重绘（数据加 `rev` 时间戳进所有 key）。
 
-### 10.2 手动课表 & ICS 导出 & 交互（v1.1.0）
+### 10.2 课表体系：课程可编辑 + 课程颜色 + 老师显示（v1.2.0 / v1.3.0）
+
+- **导入方式可选（v1.3）**：导入 ICS 弹「导入方式」对话框——作为课表 / 作为子计划本（课程即任务，
+  进待办、可完成）。`importIcsSubNotebook` 增加 `asTimetable`；不再按 importSource 自动标记课表。
+- **导入即课表（v1.2）**：选「作为课表」的导入子本标 `isTimetable`。课表与子计划本在管理页分组；
+  首页 chip 课表带日历小图标。
+- **整门课编辑（v1.3）**：课表设为活动时，点课程块 → `CourseEditSheet` 整门课编辑：名称/教室/老师 +
+  该课表内**全部节次**（日期+起止，可改/删/加），共享字段对全部节次生效；「删除整门课」删全部节次。
+  写路径 `Repository.saveCourse/deleteCourse`（id 差量：更新/新增/删除），首页与「现有课程」页共用。
+  课程不进待办列表、无完成态；待办页 + 号在活动子本为课表时回落到第一个普通子本。
+- **节次时间可编辑（v1.3）**：`PeriodConfig`（@ObservedV2，节数+每节起止）存
+  `app_settings.timetablePeriods`（{课表id:配置}）。`components/PeriodEditor` 共用组件；
+  **选择器必须由宿主页面根部渲染**（PeriodEditor 只回调 onEditPeriod(n)）——组件内嵌套 DialogShell
+  会被父弹层裁剪（真机踩过：嵌套选择器跑到卡片底部且按钮出屏）。
+- **课程颜色按课表（v1.3）**：`app_settings.courseColors` = {课表id:{课程名:"#RRGGBB"}}；
+  管理页「现有课程」（list_bullet 图标）→ 色块页设色/新建课程。渲染：PlanBookVM/CardData 经
+  `getAllCourseColors()` 嵌套 Map 查 (课表id, 课程名)，未设置回退课表色。
+- **老师显示（v1.2）**：备注「教师：X」段（`common/CourseInfo.ets`，IcsParser 共用），周视图第三行；
+  卡片保持 简称+教室。
+- **选色器（v1.3）**：`ColorPickerSheet` 9 预留色 + HSV 滑块 + **十六进制键入**（双向联动，
+  合法性 `ColorUtil.isHex`；roundtrip 单测在 Node 验过）。「自定义颜色」整行可点。
+- 已知交互：手动课表经 CourseBuilder 保存仍**整本重建**（覆盖单次课程改动）；ICS 重导同上；
+  改节次时间不自动改已有节次。
+
+### 10.3 手动课表 & ICS 导出 & 交互（v1.1.0）
 
 - **新建/编辑课表**：课表 = 带 `isTimetable` 标记的子本，定义（课程/时间段/学期）存
   `notebooks.timetableJson`；编辑保存 = 事务整本重建任务。时间段 = 周几 × 第 a-b 节 × 第 a-b 教学周，
@@ -208,7 +232,7 @@ Repository.observeExpandedTasks(masterId, subIds, days)   ← 唯一展开/完�
   chip 点按 = 切活动子本、长按 = 切显示开关（隐藏 chip 留行内：半透明+删除线+虚线）。
 - **教学周数**：`app_settings.termStart`（设置页配置），App 标题与卡片显示「第 N 周」。
 
-### 10.3 关键坑速查（真机踩过，别再踩）
+### 10.4 关键坑速查（真机踩过，别再踩）
 
 - **Repository.enqueue 死锁**：链内任务再调用其它 enqueue 方法会互相等待——已加重入检测
   （`inChainJob` 时直接执行）。新增「维护类写」时注意。

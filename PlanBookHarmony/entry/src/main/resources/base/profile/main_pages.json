@@ -4,6 +4,7 @@
     "pages/CardConfigPage",
     "pages/ReviewEditPage",
     "pages/NotebookManagerPage",
-    "pages/CourseBuilderPage"
+    "pages/CourseBuilderPage",
+    "pages/CourseColorsPage"
   ]
 }

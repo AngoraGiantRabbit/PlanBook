@@ -1,8 +1,11 @@
 import { AppColors, ColorUtil } from '../common/Theme';
-import { Notebook, SubNotebookPalette } from '../model/Models';
+import { Notebook, PeriodConfig } from '../model/Models';
+import { ColorPickerSheet } from '../components/ColorPickerSheet';
+import { PeriodEditor } from '../components/PeriodEditor';
 import { NotebookManagerVM } from '../viewmodel/ViewModels';
 import { IcsExporter } from '../data/IcsExporter';
 import { Repository } from '../data/Repository';
+import { DatePickerOverlay, TimePickerOverlay, parseTime } from '../components/Pickers';
 import { DialogShell, TextButton } from '../components/Ui';
 import { router } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
@@ -25,10 +28,18 @@ struct NotebookManagerPage {
   @Local renameText: string = '';
   @Local deleting: Notebook | null = null;
   @Local coloring: Notebook | null = null;
-  @Local showCustomColor: boolean = false;
-  @Local hue: number = 0;
-  @Local sat: number = 0;
-  @Local bri: number = 0;
+  /** 待导入的 ICS（选完文件后先选导入方式） */
+  @Local showImportKind: boolean = false;
+  @Local pendingImportName: string = '';
+  @Local pendingImportContent: string = '';
+  /** 课表节次时间编辑（「改时间」按钮） */
+  @Local editingPeriodsOf: Notebook | null = null;
+  @Local periodsConfig: PeriodConfig = PeriodConfig.default();
+  /** 节次小块编辑链：先开始后结束（选择器在页面根部渲染） */
+  @Local editingPeriodN: number = -1;
+  @Local pickPeriodStart: boolean = false;
+  @Local pickPeriodEnd: boolean = false;
+
 
   aboutToAppear(): void {
     this.vm.attach();
@@ -54,7 +65,7 @@ struct NotebookManagerPage {
         . width('100%')
         . padding({ left: 8, right: 16, top: 8, bottom: 4 })
 
-        Text('活动子计划本是首页新建任务的落点；显示开关只控制是否在计划本页聚合显示。')
+        Text('活动子计划本是首页新建任务/课程的落点；显示开关只控制是否在计划本页聚合显示。课表设为活动后，点击课程即可编辑。')
           . fontSize(12)
           . fontColor(AppColors.onSurfaceVariant)
           . width('100%')
@@ -62,9 +73,30 @@ struct NotebookManagerPage {
 
         Scroll() {
           Column() {
-            ForEach(this.vm.subs, (sub: Notebook) => {
+            Text(`子计划本 (${this.normalSubs().length})`)
+              . fontSize(15)
+              . fontWeight(FontWeight.Bold)
+              . fontColor(AppColors.onSurface)
+              . width('100%')
+              . padding({ top: 8, bottom: 4 })
+            ForEach(this.normalSubs(), (sub: Notebook) => {
               this.SubNotebookRow(sub)
-            }, (sub: Notebook) => `${sub.id}-${sub.name}-${sub.isVisible}-${sub.isActive}-${sub.isTimetable}-${this.vm.activeSubId}`)
+            }, (sub: Notebook) => `${sub.id}-${sub.name}-${sub.isVisible}-${sub.isActive}-${this.vm.activeSubId}`)
+
+            Text(`课程表 (${this.timetableSubs().length})`)
+              . fontSize(15)
+              . fontWeight(FontWeight.Bold)
+              . fontColor(AppColors.onSurface)
+              . width('100%')
+              . padding({ top: 16, bottom: 4 })
+            Text('课表（新建或 ICS 导入）：课程不是任务，不进待办列表；设为活动后首页可点课编辑、加号加课；每行「现有课程」管理课程颜色。')
+              . fontSize(11)
+              . fontColor(AppColors.onSurfaceVariant)
+              . width('100%')
+              . padding({ bottom: 4 })
+            ForEach(this.timetableSubs(), (sub: Notebook) => {
+              this.SubNotebookRow(sub)
+            }, (sub: Notebook) => `${sub.id}-${sub.name}-${sub.isVisible}-${sub.isActive}-${this.vm.activeSubId}`)
           }
           . width('100%')
           . padding({ left: 16, right: 16 })
@@ -72,6 +104,7 @@ struct NotebookManagerPage {
         . scrollBar(BarState.Off)
         . layoutWeight(1)
         . align(Alignment.TopStart)
+
 
         Row({ space: 8 }) {
           Button('新建子本')
@@ -121,6 +154,14 @@ struct NotebookManagerPage {
     return `子计划本 ${n}`;
   }
 
+  private normalSubs(): Notebook[] {
+    return this.vm.subs.filter((s: Notebook): boolean => !s.isTimetable);
+  }
+
+  private timetableSubs(): Notebook[] {
+    return this.vm.subs.filter((s: Notebook): boolean => s.isTimetable);
+  }
+
   /** 导出该子计划本为 .ics（用户选保存位置） */
   private exportIcs(sub: Notebook): void {
     Repository.getTasksOfSubNotebook(sub.id).then((tasks) => {
@@ -134,7 +175,7 @@ struct NotebookManagerPage {
     });
   }
 
-  /** #11：DocumentViewPicker 选 .ics → 读文本（fd + UTF-8 解码）→ 建导入子计划本 */
+  /** #11：DocumentViewPicker 选 .ics → 读文本 → 选导入方式（课表 / 子计划本）→ 建导入子本 */
   private pickIcs(): void {
     try {
       const docPicker = new picker.DocumentViewPicker();
@@ -151,15 +192,20 @@ struct NotebookManagerPage {
         const uri = result[0];
         const name = this.fileNameOf(uri);
         const content = this.readTextFromUri(uri);
-        if (content === null) {
-          this.vm.importIcs(name, ''); // 空内容 → 走「没有解析到事件」提示
-        } else {
-          this.vm.importIcs(name, content);
-        }
+        this.pendingImportName = name;
+        this.pendingImportContent = content ?? '';
+        this.showImportKind = true;
       });
     } catch (e) {
       console.error(`open picker failed: ${e}`);
     }
+  }
+
+  private runImport(asTimetable: boolean): void {
+    this.showImportKind = false;
+    this.vm.importIcs(this.pendingImportName, this.pendingImportContent, asTimetable);
+    this.pendingImportName = '';
+    this.pendingImportContent = '';
   }
 
   /** file:// URI → 文本；失败返回 null */
@@ -203,16 +249,8 @@ struct NotebookManagerPage {
           . fontColor(AppColors.onSurface)
           . layoutWeight(1)
           . maxLines(1)
-        if (sub.isTimetable) {
-          Text('课表')
-            . fontSize(10)
-            . fontColor(AppColors.onPrimaryContainer)
-            . padding({ left: 4, right: 4, top: 2, bottom: 2 })
-            . borderRadius(4)
-            . backgroundColor(AppColors.primaryContainer)
-        }
         if (sub.isImported) {
-          // #11：导入子计划本标识（只读快照，ADR-0005）
+          // 导入课表标识（同源重导整本替换）
           Text('导入')
             . fontSize(10)
             . fontColor(AppColors.onTertiaryContainer)
@@ -231,7 +269,7 @@ struct NotebookManagerPage {
       }
       . width('100%')
 
-      Text(sub.id === this.vm.activeSubId ? '首页新建任务的落点' : '点击设为活动')
+      Text(sub.id === this.vm.activeSubId ? (sub.isTimetable ? '首页点课编辑、加号加课的落点' : '首页新建任务的落点') : '点击设为活动')
         . fontSize(12)
         . fontColor(AppColors.onSurfaceVariant)
         . width('100%')
@@ -243,6 +281,14 @@ struct NotebookManagerPage {
           . padding(4)
           . onClick(() => this.exportIcs(sub))
         if (sub.isTimetable) {
+          // 课表节次时间（改时间）：节数 + 每节起止
+          SymbolGlyph($r('sys.symbol.clock'))
+            . fontSize(20)
+            . fontColor([AppColors.onSurfaceVariant])
+            . padding(4)
+            . onClick(() => this.openPeriods(sub))
+        }
+        if (sub.timetableJson !== null) {
           SymbolGlyph($r('sys.symbol.calendar'))
             . fontSize(20)
             . fontColor([AppColors.primary])
@@ -251,17 +297,22 @@ struct NotebookManagerPage {
               router.pushUrl({ url: 'pages/CourseBuilderPage', params: { subId: sub.id } });
             })
         }
+        if (sub.isTimetable) {
+          // 现有课程：色块管理该课表的课程颜色，可新建课程
+          SymbolGlyph($r('sys.symbol.list_bullet'))
+            . fontSize(20)
+            . fontColor([AppColors.onSurfaceVariant])
+            . padding(4)
+            . onClick(() => {
+              router.pushUrl({ url: 'pages/CourseColorsPage', params: { subId: sub.id } });
+            })
+        }
         SymbolGlyph($r('sys.symbol.paintpalette'))
           . fontSize(20)
           . fontColor([AppColors.onSurfaceVariant])
           . padding(4)
           . onClick(() => {
             this.coloring = sub;
-            this.showCustomColor = false;
-            const hsv = ColorUtil.toHsv(sub.color);
-            this.hue = hsv[0];
-            this.sat = hsv[1];
-            this.bri = hsv[2];
           })
         SymbolGlyph($r('sys.symbol.square_and_pencil'))
           . fontSize(20)
@@ -273,10 +324,10 @@ struct NotebookManagerPage {
           })
         SymbolGlyph($r('sys.symbol.trash'))
           . fontSize(20)
-          . fontColor([this.vm.subs.length > 1 ? AppColors.onSurfaceVariant : AppColors.outline])
+          . fontColor([this.vm.canDelete(sub) ? AppColors.onSurfaceVariant : AppColors.outline])
           . padding(4)
           . onClick(() => {
-            if (this.vm.subs.length > 1) {
+            if (this.vm.canDelete(sub)) {
               this.deleting = sub;
             }
           })
@@ -291,6 +342,22 @@ struct NotebookManagerPage {
     . padding({ top: 8, bottom: 8 })
     . border({ width: { bottom: 1 }, color: AppColors.surfaceVariant })
     . onClick(() => this.vm.setActiveSubNotebook(sub.id))
+  }
+
+  /** 「改时间」：打开节次编辑弹层（载入该课表已存配置） */
+  private openPeriods(sub: Notebook): void {
+    this.editingPeriodsOf = sub;
+    Repository.getTimetablePeriods(sub.id).then((p: PeriodConfig) => {
+      this.periodsConfig = p;
+    });
+  }
+
+  private savePeriods(): void {
+    const sub = this.editingPeriodsOf;
+    if (sub !== null) {
+      Repository.setTimetablePeriods(sub.id, this.periodsConfig);
+    }
+    this.editingPeriodsOf = null;
   }
 
   @Builder
@@ -387,10 +454,104 @@ struct NotebookManagerPage {
       }
     }
 
-    // 颜色选择对话框
+    // 颜色选择（复用 ColorPickerSheet：预设 + HSV 自定义）
     if (this.coloring !== null) {
-      this.ColorPickerDialog()
+      ColorPickerSheet({
+        current: this.coloring.color,
+        onPick: (c: string) => {
+          const nb = this.coloring;
+          if (nb !== null) {
+            this.vm.setSubNotebookColor(nb, c);
+          }
+          this.coloring = null;
+        },
+        onDismiss: () => this.coloring = null
+      })
     }
+
+    // 课表节次时间编辑（「改时间」）
+    if (this.editingPeriodsOf !== null) {
+      DialogShell({
+        onDismiss: () => this.editingPeriodsOf = null
+      }) {
+        Column({ space: 10 }) {
+          Text(`节次时间 · ${this.editingPeriodsOf !== null ? this.editingPeriodsOf.name : ''}`)
+            . fontSize(17)
+            . fontWeight(FontWeight.Bold)
+          Text('修改影响此后该课表新建课程/编辑课表时展开的时间，已有节次不自动改。')
+            . fontSize(11)
+            . fontColor(AppColors.onSurfaceVariant)
+          PeriodEditor({
+            config: this.periodsConfig,
+            compact: true,
+            onEditPeriod: (n: number) => {
+              this.editingPeriodN = n;
+              this.pickPeriodStart = true;
+            }
+          })
+          Row({ space: 4 }) {
+            TextButton({ label: '取消', onTap: () => this.editingPeriodsOf = null })
+            Blank()
+            TextButton({ label: '保存', onTap: () => this.savePeriods() })
+          }
+          . width('100%')
+        }
+        . width('100%')
+      }
+    }
+
+    // 导入方式选择：作为课表 / 作为子计划本
+    if (this.showImportKind) {
+      DialogShell({
+        onDismiss: () => this.showImportKind = false
+      }) {
+        Column({ space: 10 }) {
+          Text('导入方式')
+            . fontSize(17)
+            . fontWeight(FontWeight.Bold)
+          Text(`「${this.pendingImportName}」导入为：`)
+            . fontSize(13)
+            . fontColor(AppColors.onSurfaceVariant)
+          TextButton({
+            label: '作为课表（点课编辑 · 课程颜色）',
+            onTap: () => this.runImport(true)
+          })
+          TextButton({
+            label: '作为子计划本（课程作为任务，进待办）',
+            onTap: () => this.runImport(false)
+          })
+          TextButton({ label: '取消', onTap: () => this.showImportKind = false })
+        }
+        . width('100%')
+        . alignItems(HorizontalAlign.Start)
+      }
+    }
+
+    // 节次起止选择器（根部渲染，盖在「改时间」弹层之上）：先开始后结束
+    if (this.pickPeriodStart && this.editingPeriodN > 0) {
+      TimePickerOverlay({
+        initialHour: this.periodInitHour(true),
+        initialMinute: this.periodInitMinute(true),
+        onConfirm: (t: string) => {
+          this.applyPeriodTime(true, t);
+          this.pickPeriodStart = false;
+          this.pickPeriodEnd = true;
+        },
+        onDismiss: () => this.pickPeriodStart = false
+      })
+    }
+    if (this.pickPeriodEnd && this.editingPeriodN > 0) {
+      TimePickerOverlay({
+        initialHour: this.periodInitHour(false),
+        initialMinute: this.periodInitMinute(false),
+        onConfirm: (t: string) => {
+          this.applyPeriodTime(false, t);
+          this.pickPeriodEnd = false;
+        },
+        onDismiss: () => this.pickPeriodEnd = false
+      })
+    }
+
 
     // #11：导入结果提示
     if (this.vm.importMessage !== null) {
@@ -412,165 +573,21 @@ struct NotebookManagerPage {
     }
   }
 
-  /** 颜色选择：预设调色板色圈（4 个一行）+ 自定义圈（HSV 调色盘任选） */
-  @Builder
-  ColorPickerDialog() {
-    if (this.showCustomColor) {
-      this.CustomColorPicker()
-    } else {
-      DialogShell({
-        onDismiss: () => this.coloring = null
-      }) {
-        Column({ space: 12 }) {
-          Text('选择颜色')
-            . fontSize(17)
-            . fontWeight(FontWeight.Bold)
-          Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
-            ForEach(SubNotebookPalette.all(), (hex: string) => {
-              Stack() {
-                Circle({ width: 40, height: 40 })
-                  . fill(hex)
-                if (this.coloring !== null && this.coloring.color === hex) {
-                  Text('✓')
-                    . fontSize(18)
-                    . fontColor('#FFFFFF')
-                }
-              }
-              . margin(6)
-              . borderRadius(20)
-              . border({
-                width: this.coloring !== null && this.coloring.color === hex ? 3 : 1,
-                color: this.coloring !== null && this.coloring.color === hex ? AppColors.primary : AppColors.outline
-              })
-              . onClick(() => {
-                if (this.coloring !== null) {
-                  this.vm.setSubNotebookColor(this.coloring, hex);
-                }
-                this.coloring = null;
-              })
-            }, (hex: string) => `${hex}-${this.coloring !== null ? this.coloring.color ?? '' : ''}`)
-          }
-          . width('100%')
-
-          Row({ space: 8 }) {
-            Column()
-              . width(40)
-              . height(40)
-              . borderRadius(20)
-              . linearGradient({
-                angle: 90,
-                colors: [['#E57373', 0], ['#FFB74D', 0.17], ['#FFF176', 0.33], ['#81C784', 0.5],
-                  ['#4DD0E1', 0.67], ['#7986CB', 0.83], ['#BA68C8', 1]]
-              })
-              . border({ width: 1, color: AppColors.outline })
-              . onClick(() => this.showCustomColor = true)
-            Text('自定义颜色')
-              . fontSize(14)
-              . fontColor(AppColors.onSurface)
-          }
-          . width('100%')
-
-          TextButton({ label: '取消', onTap: () => this.coloring = null })
-        }
-        . width('100%')
-      }
-    }
+  private applyPeriodTime(isStart: boolean, t: string): void {
+    const n = this.editingPeriodN;
+    const cur = this.periodsConfig.time(n);
+    const next: string[] = isStart ? [t, cur[1]] : [cur[0], t];
+    this.periodsConfig.times[n - 1] = next;
   }
 
-  private customHex(): string {
-    return ColorUtil.hsv(this.hue, this.sat, this.bri);
+  private periodInitHour(isStart: boolean): number {
+    const p = parseTime(this.periodsConfig.time(this.editingPeriodN)[isStart ? 0 : 1]);
+    return p === null ? 8 : p[0];
   }
 
-  /** 自定义调色盘：HSV 三滑块 + 实时预览，确定后回调 "#RRGGBB" */
-  @Builder
-  CustomColorPicker() {
-    DialogShell({
-      onDismiss: () => this.showCustomColor = false
-    }) {
-      Scroll() {
-        Column({ space: 10 }) {
-          Text('自定义颜色')
-            . fontSize(17)
-            . fontWeight(FontWeight.Bold)
-          Row({ space: 12 }) {
-            Circle({ width: 52, height: 52 })
-              . fill(this.customHex())
-              . border({ width: 1, color: AppColors.outline })
-            Text(this.customHex())
-              . fontSize(16)
-              . fontWeight(FontWeight.Medium)
-          }
-          . width('100%')
-
-          Text('色相')
-            . fontSize(12)
-            . fontColor(AppColors.onSurfaceVariant)
-            . width('100%')
-          Row()
-            . height(10)
-            . width('100%')
-            . borderRadius(5)
-            . linearGradient({
-              angle: 90,
-              colors: [['#FF0000', 0], ['#FFFF00', 0.17], ['#00FF00', 0.33], ['#00FFFF', 0.5],
-                ['#0000FF', 0.67], ['#FF00FF', 0.83], ['#FF0000', 1]]
-            })
-          Slider({ value: this.hue, min: 0, max: 360 })
-            . selectedColor(AppColors.primary)
-            . onChange((v: number) => this.hue = v)
-
-          Text('饱和度')
-            . fontSize(12)
-            . fontColor(AppColors.onSurfaceVariant)
-            . width('100%')
-          Row()
-            . height(10)
-            . width('100%')
-            . borderRadius(5)
-            . linearGradient({
-              angle: 90,
-              colors: [[ColorUtil.hsv(this.hue, 0, 1), 0], [ColorUtil.hsv(this.hue, 1, 1), 1]]
-            })
-          Slider({ value: this.sat * 100, min: 0, max: 100 })
-            . selectedColor(AppColors.primary)
-            . onChange((v: number) => this.sat = v / 100)
-
-          Text('明度')
-            . fontSize(12)
-            . fontColor(AppColors.onSurfaceVariant)
-            . width('100%')
-          Row()
-            . height(10)
-            . width('100%')
-            . borderRadius(5)
-            . linearGradient({
-              angle: 90,
-              colors: [['#000000', 0], [ColorUtil.hsv(this.hue, this.sat, 1), 1]]
-            })
-          Slider({ value: this.bri * 100, min: 0, max: 100 })
-            . selectedColor(AppColors.primary)
-            . onChange((v: number) => this.bri = v / 100)
-
-          Row({ space: 4 }) {
-            TextButton({ label: '取消', onTap: () => this.showCustomColor = false })
-            Blank()
-            TextButton({
-              label: '确定',
-              onTap: () => {
-                if (this.coloring !== null) {
-                  this.vm.setSubNotebookColor(this.coloring, this.customHex());
-                }
-                this.coloring = null;
-                this.showCustomColor = false;
-              }
-            })
-          }
-          . width('100%')
-        }
-        . width('100%')
-      }
-      . scrollBar(BarState.Off)
-      . align(Alignment.TopStart)
-    }
+  private periodInitMinute(isStart: boolean): number {
+    const p = parseTime(this.periodsConfig.time(this.editingPeriodN)[isStart ? 0 : 1]);
+    return p === null ? 0 : p[1];
   }
+
 }
